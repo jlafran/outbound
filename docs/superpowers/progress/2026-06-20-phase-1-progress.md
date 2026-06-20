@@ -12,13 +12,13 @@ Completadas y aprobadas:
 2. Workspace y auditoría.
 3. Dominio de ofertas.
 4. Campañas y máquina de estados.
-
-Pendientes:
-
 5. Recomendación de nichos.
 6. Base central de empresas y research.
 7. Scoring reproducible.
 8. Dataset dry-run.
+
+Pendientes:
+
 9. Servicio de dossier.
 10. Exportación Markdown.
 11. Exportación PDF.
@@ -29,7 +29,7 @@ Pendientes:
 
 ## Línea base verificada
 
-- 53 pruebas automatizadas pasan.
+- 160 pruebas automatizadas pasan.
 - ESLint pasa.
 - TypeScript pasa.
 - Build de producción pasa.
@@ -48,6 +48,10 @@ Pendientes:
 - Máquina de estados con validación de orden e invariantes.
 - Control de concurrencia optimista visible para el cliente mediante `expectedVersion`.
 - Fase 1 solo permite avanzar hasta `discovery_ready`.
+- Recomendaciones de nichos deterministas, con score derivado y guardrails para texto generado.
+- Base central de empresas con deduplicación, aislamiento por workspace e integridad entre fuentes, evidencia, campañas y ofertas.
+- Scoring de empresas reproducible y explicable.
+- Dataset dry-run con tres empresas argentinas ficticias, contactos corporativos, evidencia, hipótesis, estimaciones y scores.
 
 ## Commits relevantes
 
@@ -58,10 +62,13 @@ Pendientes:
 - `4913a62` — creación atómica de ofertas.
 - `948f36f` — máquina de estados de campañas.
 - `c1ab538` — concurrencia e invariantes de campañas.
+- `266b94d` — seguridad de recomendaciones de nichos.
+- `a182104` — integridad de la base central de empresas.
+- `621cc3f` — scoring explicable de empresas.
 
 ## Próximo paso
 
-Implementar la Tarea 5: recomendación de nichos mediante un puerto intercambiable y un proveedor fake determinista. Debe integrarse con la campaña existente usando `expectedVersion`, registrar recomendaciones y permitir su aprobación sin incorporar todavía OpenAI real.
+Implementar la Tarea 9: servicio de dossier versionado. Debe separar necesidades confirmadas, hechos investigados, hipótesis, estimaciones y recomendaciones, y preparar el modelo común que luego exportarán Markdown y PDF.
 
 ## Cómo retomar
 
@@ -75,5 +82,5 @@ pnpm typecheck
 git status --short
 ```
 
-4. Continuar desde la Tarea 5 del plan:
+4. Continuar desde la Tarea 9 del plan:
    `docs/superpowers/plans/2026-06-19-outreach-phase-1-foundation.md`.
