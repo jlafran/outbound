@@ -1,4 +1,4 @@
-export type Result<T, E> =
+export type Result<T, E extends string = string> =
   | {
       ok: true;
       value: T;
@@ -6,4 +6,5 @@ export type Result<T, E> =
   | {
       ok: false;
       error: E;
+      message: string;
     };
