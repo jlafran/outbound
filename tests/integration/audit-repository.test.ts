@@ -7,7 +7,9 @@ import {
   workspaceMembers,
 } from "@/db/schema";
 import {
+  createDrizzleAuditRepository,
   createMemoryAuditRepository,
+  type AuditDbExecutor,
   type AuditEventInput,
 } from "@/features/audit/audit-repository";
 
@@ -107,6 +109,43 @@ describe("createMemoryAuditRepository", () => {
   });
 });
 
+describe("createDrizzleAuditRepository", () => {
+  it("lists workspace events by workspace and monotonic sequence", async () => {
+    let orderedColumns: string[] = [];
+    const database = {
+      select() {
+        return {
+          from() {
+            return {
+              where() {
+                return {
+                  orderBy(...expressions: { queryChunks: unknown[] }[]) {
+                    orderedColumns = expressions.map((expression) => {
+                      const column = expression.queryChunks.find(
+                        (chunk): chunk is { name: string } =>
+                          typeof chunk === "object" &&
+                          chunk !== null &&
+                          "name" in chunk,
+                      );
+
+                      return column?.name ?? "";
+                    });
+                    return Promise.resolve([]);
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    } as unknown as AuditDbExecutor;
+
+    await createDrizzleAuditRepository(database).list("workspace-1");
+
+    expect(orderedColumns).toEqual(["workspace_id", "sequence"]);
+  });
+});
+
 describe("auditEvents schema", () => {
   it("constrains actions to the AuditAction values", () => {
     expect(auditEvents.action.enumValues).toEqual([
@@ -148,6 +187,18 @@ describe("auditEvents schema", () => {
       listingIndex?.config.columns.map((column) =>
         "name" in column ? column.name : undefined,
       ),
-    ).toEqual(["workspace_id", "created_at", "id"]);
+    ).toEqual(["workspace_id", "sequence"]);
+  });
+
+  it("uses a database-generated monotonic sequence for append order", () => {
+    const sequenceColumn = getTableConfig(auditEvents).columns.find(
+      (column) => column.name === "sequence",
+    );
+
+    expect(sequenceColumn).toMatchObject({
+      dataType: "number",
+      notNull: true,
+      hasDefault: true,
+    });
   });
 });

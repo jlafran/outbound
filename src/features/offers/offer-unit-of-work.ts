@@ -51,44 +51,54 @@ export function createMemoryOfferUnitOfWork(
   const committedEvents: AuditEventInput[] = [];
   const offerRepository = createMemoryOfferRepository(committedOffers);
   const auditRepository = createMemoryAuditRepository(committedEvents);
+  let transactionQueue = Promise.resolve();
 
   return {
     offerRepository,
     auditRepository,
-    async run(operation) {
-      const stagedOffers = cloneOfferRecords(committedOffers);
-      const stagedEvents = structuredClone(committedEvents);
-      const stagedOfferRepository =
-        createMemoryOfferRepository(stagedOffers);
-      const stagedAuditRepository =
-        createMemoryAuditRepository(stagedEvents);
-      let appendNumber = 0;
+    run(operation) {
+      const transaction = transactionQueue.then(async () => {
+        const stagedOffers = cloneOfferRecords(committedOffers);
+        const stagedEvents = structuredClone(committedEvents);
+        const stagedOfferRepository =
+          createMemoryOfferRepository(stagedOffers);
+        const stagedAuditRepository =
+          createMemoryAuditRepository(stagedEvents);
+        let appendNumber = 0;
 
-      const result = await operation({
-        offerRepository: stagedOfferRepository,
-        auditRepository: {
-          async append(input) {
-            appendNumber += 1;
-            await options.beforeAuditAppend?.(input, appendNumber);
-            await stagedAuditRepository.append(input);
+        const result = await operation({
+          offerRepository: stagedOfferRepository,
+          auditRepository: {
+            async append(input) {
+              appendNumber += 1;
+              await options.beforeAuditAppend?.(input, appendNumber);
+              await stagedAuditRepository.append(input);
+            },
+            list(workspaceId) {
+              return stagedAuditRepository.list(workspaceId);
+            },
           },
-          list(workspaceId) {
-            return stagedAuditRepository.list(workspaceId);
-          },
-        },
+        });
+
+        committedOffers.clear();
+        for (const [id, record] of stagedOffers) {
+          committedOffers.set(id, structuredClone(record));
+        }
+        committedEvents.splice(
+          0,
+          committedEvents.length,
+          ...structuredClone(stagedEvents),
+        );
+
+        return result;
       });
 
-      committedOffers.clear();
-      for (const [id, record] of stagedOffers) {
-        committedOffers.set(id, structuredClone(record));
-      }
-      committedEvents.splice(
-        0,
-        committedEvents.length,
-        ...structuredClone(stagedEvents),
+      transactionQueue = transaction.then(
+        () => undefined,
+        () => undefined,
       );
 
-      return result;
+      return transaction;
     },
   };
 }

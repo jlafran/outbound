@@ -142,6 +142,64 @@ describe("OfferService", () => {
       ).toHaveLength(2);
     },
   );
+
+  it("serializes overlapping creates without losing committed state", async () => {
+    let firstAppend = true;
+    let releaseFirstAppend!: () => void;
+    let signalFirstAppend!: () => void;
+    const firstAppendReached = new Promise<void>((resolve) => {
+      signalFirstAppend = resolve;
+    });
+    const firstAppendRelease = new Promise<void>((resolve) => {
+      releaseFirstAppend = resolve;
+    });
+    const unitOfWork = createMemoryOfferUnitOfWork({
+      async beforeAuditAppend() {
+        if (firstAppend) {
+          firstAppend = false;
+          signalFirstAppend();
+          await firstAppendRelease;
+        }
+      },
+    });
+    const service = new OfferService(unitOfWork);
+
+    const firstCreate = service.createOffer({
+      workspaceId: "workspace-1",
+      actorId: "user-1",
+      input: { ...validOfferInput, name: "First offer" },
+    });
+    await firstAppendReached;
+
+    const secondCreate = service.createOffer({
+      workspaceId: "workspace-1",
+      actorId: "user-1",
+      input: { ...validOfferInput, name: "Second offer" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseFirstAppend();
+
+    const [first, second] = await Promise.all([
+      firstCreate,
+      secondCreate,
+    ]);
+
+    expect(
+      await unitOfWork.offerRepository.getById(
+        "workspace-1",
+        first.id,
+      ),
+    ).toEqual(first);
+    expect(
+      await unitOfWork.offerRepository.getById(
+        "workspace-1",
+        second.id,
+      ),
+    ).toEqual(second);
+    expect(
+      await unitOfWork.auditRepository.list("workspace-1"),
+    ).toHaveLength(4);
+  });
 });
 
 describe("offers schema", () => {

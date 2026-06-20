@@ -1,4 +1,5 @@
 import {
+  bigserial,
   foreignKey,
   index,
   jsonb,
@@ -34,6 +35,7 @@ export const auditEvents = pgTable(
   "audit_events",
   {
     id: text("id").primaryKey(),
+    sequence: bigserial("sequence", { mode: "number" }).notNull(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id),
@@ -56,8 +58,7 @@ export const auditEvents = pgTable(
     }),
     index("audit_events_workspace_listing_idx").on(
       table.workspaceId,
-      table.createdAt,
-      table.id,
+      table.sequence,
     ),
   ],
 );

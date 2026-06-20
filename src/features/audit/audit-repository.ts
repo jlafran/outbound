@@ -64,7 +64,10 @@ export function createDrizzleAuditRepository(
         })
         .from(auditEvents)
         .where(eq(auditEvents.workspaceId, workspaceId))
-        .orderBy(asc(auditEvents.createdAt), asc(auditEvents.id));
+        .orderBy(
+          asc(auditEvents.workspaceId),
+          asc(auditEvents.sequence),
+        );
     },
   };
 }
