@@ -29,7 +29,7 @@ El MVP cubrirá el ciclo desde la carga de una solución hasta que la primera re
 9. Creación de tareas manuales para LinkedIn.
 10. Clasificación y gestión de respuestas.
 11. Coordinación de agenda y creación del evento de Google Meet.
-12. Preparación de un dossier para la reunión.
+12. Preparación de un dossier editable y exportable para la reunión.
 13. Registro de que la reunión ocurrió y de si fue calificada.
 
 Quedan fuera del MVP:
@@ -226,17 +226,40 @@ El sistema consultará disponibilidad, creará el evento en Google Calendar, agr
 
 ### 5.11 Dossier
 
-Antes de la reunión, el sistema preparará:
+Antes de la reunión, el sistema preparará un dossier centralizado en tres formatos sincronizados:
 
-- Perfil de la empresa.
-- Perfil y rol del contacto.
-- Historial completo de interacciones.
-- Problemas detectados y evidencia.
-- Competidores y brechas.
-- Oportunidades relacionadas con la solución.
-- Estimación preliminar de impacto económico.
-- Intereses, objeciones y preguntas del prospecto.
-- Fuentes y nivel de confianza.
+- Vista editable dentro del dashboard.
+- Archivo Markdown (`.md`).
+- Documento PDF con formato profesional.
+
+Los tres formatos se generarán desde el mismo modelo de datos para evitar inconsistencias. El dossier contendrá:
+
+1. Resumen ejecutivo de la oportunidad.
+2. Perfil de la empresa, actividad y modelo de ingresos.
+3. Decisores, participantes y datos laborales de contacto.
+4. Historial completo de interacciones.
+5. Necesidades, problemas e intereses expresados por el prospecto.
+6. Problemas detectados mediante research que aún no fueron confirmados.
+7. Evidencias, fuentes, fecha y nivel de confianza.
+8. Competidores, diferencias y brechas observadas.
+9. Impacto económico preliminar, incluyendo supuestos.
+10. Recomendaciones priorizadas para la reunión:
+    - Áreas y oportunidades hacia las cuales orientar la conversación.
+    - Preguntas que conviene realizar.
+    - Soluciones o ángulos de valor que conviene explorar.
+    - Quick wins potenciales.
+    - Riesgos, objeciones previsibles y temas que deben evitarse.
+11. Preguntas pendientes que deben validarse durante la reunión.
+
+El dossier distinguirá visual y semánticamente:
+
+- **Confirmado por el prospecto:** información expresada directamente en la conversación.
+- **Hecho investigado:** información respaldada por una fuente pública.
+- **Hipótesis:** interpretación que debe validarse.
+- **Estimación:** cálculo preliminar acompañado por sus supuestos.
+- **Recomendación:** orientación sugerida para conducir la reunión.
+
+La vista del dashboard permitirá corregir, ocultar o agregar información antes de exportar. Cada exportación guardará fecha, versión y responsable. El equipo podrá regenerar el Markdown y el PDF cuando cambien los datos.
 
 El MVP termina cuando se registra que la reunión ocurrió. El equipo marcará si fue calificada y agregará notas.
 
@@ -260,6 +283,7 @@ El MVP termina cuando se registra que la reunión ocurrió. El equipo marcará s
 - **Secuencia:** pasos, tiempos y reglas.
 - **Conversación:** hilo sincronizado y clasificación.
 - **Reunión:** agenda, enlace, asistencia y calificación.
+- **Dossier:** contenido versionado, recomendaciones y exportaciones para una reunión.
 - **Experimento:** combinación de nicho, oferta, mensaje, fuente y proveedor.
 - **Costo:** consumo atribuido a una campaña, empresa o reunión.
 - **Exclusión:** no contactar, unsubscribe, rechazo u otra restricción.
@@ -326,6 +350,7 @@ Los cambios de estado serán auditables.
 - Clasificación de respuestas.
 - Agenda.
 - Dossier.
+- Renderizado y exportación de dossiers a Markdown y PDF.
 - Analítica y experimentos.
 
 Cada módulo tendrá una interfaz definida para poder reemplazar su implementación sin afectar a los consumidores.
@@ -494,6 +519,8 @@ El MVP estará listo para uso interno cuando:
 - Escale casos sensibles.
 - Coordine una reunión con Google Meet.
 - Genere el dossier.
+- Permita editarlo y exportarlo de forma consistente a Markdown y PDF.
+- Distinga necesidades confirmadas, hechos, hipótesis, estimaciones y recomendaciones.
 - Registre asistencia y calificación.
 - Mida costos y funnel.
 - Evite envíos duplicados y respete exclusiones globales.
@@ -509,4 +536,3 @@ Después de validar reuniones calificadas:
 5. Evaluar automatización segura de LinkedIn.
 6. Crear workspaces separados para clientes.
 7. Convertir el producto interno en SaaS.
-
