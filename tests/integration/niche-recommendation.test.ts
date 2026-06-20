@@ -169,6 +169,12 @@ describe("nicheRecommendationSchema", () => {
       nicheRecommendationSchema.parse({ ...valid, id: " " }),
     ).toThrow();
     expect(() =>
+      nicheRecommendationSchema.parse({
+        ...valid,
+        id: "logistica argentina con texto",
+      }),
+    ).toThrow();
+    expect(() =>
       nicheRecommendationSchema.parse({ ...valid, score: 101 }),
     ).toThrow();
     expect(() =>
@@ -315,6 +321,59 @@ describe("CampaignService niche recommendations", () => {
         campaign.id,
       ),
     ).toEqual(campaign);
+  });
+
+  it("rejects an unsafe advisor-controlled name", async () => {
+    const recommendations = await new FakeNicheAdvisor().recommend(
+      normalizedOffer,
+    );
+    recommendations[0].name =
+      "Logística with guaranteed 37% conversion";
+    const advisor: NicheAdvisor = {
+      async recommend() {
+        return recommendations;
+      },
+    };
+    const { service } = await createCampaignHarness({}, advisor);
+    const campaign = await service.create(campaignInput);
+
+    await expect(
+      service.recommendNiches(
+        campaign.workspaceId,
+        campaign.id,
+        "user-1",
+        campaign.version,
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining({ code: "UNSAFE_NICHE_RECOMMENDATION" }),
+    );
+  });
+
+  it("rejects an unsafe slug-shaped advisor-controlled id", async () => {
+    const offer = {
+      ...normalizedOffer,
+      prohibitedClaims: ["exclusive market proof"],
+    };
+    const recommendations = await new FakeNicheAdvisor().recommend(offer);
+    recommendations[0].id = "exclusive-market-proof";
+    const advisor: NicheAdvisor = {
+      async recommend() {
+        return recommendations;
+      },
+    };
+    const { service } = await createCampaignHarness({}, advisor, offer);
+    const campaign = await service.create(campaignInput);
+
+    await expect(
+      service.recommendNiches(
+        campaign.workspaceId,
+        campaign.id,
+        "user-1",
+        campaign.version,
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining({ code: "UNSAFE_NICHE_RECOMMENDATION" }),
+    );
   });
 
   it("rejects a substantial verbatim raw offer excerpt", async () => {

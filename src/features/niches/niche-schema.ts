@@ -1,6 +1,14 @@
 import { z } from "zod";
 
 const scoreSchema = z.number().min(0).max(100);
+const nicheIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    "Niche ID must be a lowercase kebab-case identifier",
+  );
 
 export type NicheScoreDimensions = {
   capacityToPay: number;
@@ -30,7 +38,7 @@ export function calculateNicheScore(
 
 export const nicheRecommendationSchema = z
   .object({
-    id: z.string().trim().min(1),
+    id: nicheIdSchema,
     name: z.string().trim().min(1),
     score: scoreSchema,
     capacityToPay: scoreSchema,

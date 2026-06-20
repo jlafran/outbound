@@ -161,15 +161,26 @@ function isGrounded(reasoning: string, offer: NormalizedOffer): boolean {
   );
 }
 
+function isAdvisorTextSafe(
+  value: string,
+  offer: NormalizedOffer,
+): boolean {
+  return (
+    !containsProhibitedClaim(value, offer.prohibitedClaims) &&
+    !containsRawExcerpt(value, offer.rawText) &&
+    !containsUnsupportedProtectedToken(value, offer)
+  );
+}
+
 export function areNicheRecommendationsSafe(
   offer: NormalizedOffer,
   recommendations: NicheRecommendation[],
 ): boolean {
   return recommendations.every(
-    ({ reasoning }) =>
-      !containsProhibitedClaim(reasoning, offer.prohibitedClaims) &&
-      !containsRawExcerpt(reasoning, offer.rawText) &&
-      !containsUnsupportedProtectedToken(reasoning, offer) &&
+    ({ id, name, reasoning }) =>
+      [id, name, reasoning].every((value) =>
+        isAdvisorTextSafe(value, offer),
+      ) &&
       isGrounded(reasoning, offer),
   );
 }
