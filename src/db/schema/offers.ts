@@ -9,6 +9,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 import { workspaceMembers, workspaces } from "./workspaces";
@@ -56,6 +57,10 @@ export const offers = pgTable(
     index("offers_workspace_created_at_idx").on(
       table.workspaceId,
       table.createdAt,
+      table.id,
+    ),
+    uniqueIndex("offers_workspace_id_id_unique").on(
+      table.workspaceId,
       table.id,
     ),
     check("offers_version_1_check", sql`${table.version} = 1`),

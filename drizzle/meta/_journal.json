@@ -29,6 +29,13 @@
       "when": 1781921344927,
       "tag": "0003_jittery_firebird",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781921838630,
+      "tag": "0004_quiet_colossus",
+      "breakpoints": true
     }
   ]
 }
