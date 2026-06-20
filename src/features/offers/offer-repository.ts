@@ -20,9 +20,9 @@ export interface OfferRepository {
   getById(workspaceId: string, id: string): Promise<OfferRecord | null>;
 }
 
-export function createMemoryOfferRepository(): OfferRepository {
-  const records = new Map<string, OfferRecord>();
-
+export function createMemoryOfferRepository(
+  records: Map<string, OfferRecord> = new Map(),
+): OfferRepository {
   return {
     async create(record) {
       const storedRecord = structuredClone(record);
@@ -41,7 +41,10 @@ export function createMemoryOfferRepository(): OfferRepository {
   };
 }
 
-type ApplicationDb = typeof applicationDb;
+export type OfferDbExecutor = Pick<
+  typeof applicationDb,
+  "insert" | "select"
+>;
 type OfferRow = typeof offers.$inferSelect;
 
 function toOfferRecord(row: OfferRow): OfferRecord {
@@ -55,7 +58,7 @@ function toOfferRecord(row: OfferRow): OfferRecord {
 }
 
 export function createDrizzleOfferRepository(
-  database: ApplicationDb,
+  database: OfferDbExecutor,
 ): OfferRepository {
   return {
     async create(record) {

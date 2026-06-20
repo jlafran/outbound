@@ -2,18 +2,14 @@ import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 
 import { offers, workspaceMembers } from "@/db/schema";
-import { createMemoryAuditRepository } from "@/features/audit/audit-repository";
-import { createMemoryOfferRepository } from "@/features/offers/offer-repository";
 import { OfferService } from "@/features/offers/offer-service";
+import { createMemoryOfferUnitOfWork } from "@/features/offers/offer-unit-of-work";
 import { validOfferInput } from "../fixtures/offer";
 
 describe("OfferService", () => {
   it("normalizes and persists an offer for its workspace", async () => {
-    const offerRepository = createMemoryOfferRepository();
-    const service = new OfferService(
-      offerRepository,
-      createMemoryAuditRepository(),
-    );
+    const unitOfWork = createMemoryOfferUnitOfWork();
+    const service = new OfferService(unitOfWork);
 
     const created = await service.createOffer({
       workspaceId: "workspace-1",
@@ -31,19 +27,16 @@ describe("OfferService", () => {
     expect(created.id).toEqual(expect.any(String));
     expect(created.createdAt).toBeInstanceOf(Date);
     expect(
-      await offerRepository.getById("workspace-1", created.id),
+      await unitOfWork.offerRepository.getById("workspace-1", created.id),
     ).toEqual(created);
     expect(
-      await offerRepository.getById("workspace-2", created.id),
+      await unitOfWork.offerRepository.getById("workspace-2", created.id),
     ).toBeNull();
   });
 
   it("appends created and normalized audit events in order", async () => {
-    const auditRepository = createMemoryAuditRepository();
-    const service = new OfferService(
-      createMemoryOfferRepository(),
-      auditRepository,
-    );
+    const unitOfWork = createMemoryOfferUnitOfWork();
+    const service = new OfferService(unitOfWork);
 
     const created = await service.createOffer({
       workspaceId: "workspace-1",
@@ -54,7 +47,7 @@ describe("OfferService", () => {
       },
     });
 
-    const events = await auditRepository.list("workspace-1");
+    const events = await unitOfWork.auditRepository.list("workspace-1");
 
     expect(events.map((event) => event.action)).toEqual([
       "offer.created",
@@ -76,11 +69,8 @@ describe("OfferService", () => {
   });
 
   it("keeps persisted offers immutable from input and output mutations", async () => {
-    const offerRepository = createMemoryOfferRepository();
-    const service = new OfferService(
-      offerRepository,
-      createMemoryAuditRepository(),
-    );
+    const unitOfWork = createMemoryOfferUnitOfWork();
+    const service = new OfferService(unitOfWork);
     const mutableInput = structuredClone(validOfferInput);
 
     const created = await service.createOffer({
@@ -91,7 +81,7 @@ describe("OfferService", () => {
     mutableInput.problems.push("Changed input");
     created.expectedResults.push("Changed output");
 
-    const persisted = await offerRepository.getById(
+    const persisted = await unitOfWork.offerRepository.getById(
       "workspace-1",
       created.id,
     );
@@ -101,6 +91,57 @@ describe("OfferService", () => {
       "Faster qualified pipeline",
     ]);
   });
+
+  it.each([1, 2])(
+    "rolls back all persistence when audit append %i fails and retries once",
+    async (failedAppend) => {
+      let failurePending = true;
+      let failedOfferId: string | undefined;
+      const unitOfWork = createMemoryOfferUnitOfWork({
+        beforeAuditAppend(input, appendNumber) {
+          if (failurePending && appendNumber === failedAppend) {
+            failurePending = false;
+            failedOfferId = input.entityId;
+            throw new Error(`audit append ${appendNumber} failed`);
+          }
+        },
+      });
+      const service = new OfferService(unitOfWork);
+      const createInput = {
+        workspaceId: "workspace-1",
+        actorId: "user-1",
+        input: validOfferInput,
+      };
+
+      await expect(service.createOffer(createInput)).rejects.toThrow(
+        `audit append ${failedAppend} failed`,
+      );
+
+      expect(failedOfferId).toEqual(expect.any(String));
+      expect(
+        await unitOfWork.offerRepository.getById(
+          "workspace-1",
+          failedOfferId!,
+        ),
+      ).toBeNull();
+      expect(
+        await unitOfWork.auditRepository.list("workspace-1"),
+      ).toEqual([]);
+
+      const retried = await service.createOffer(createInput);
+
+      expect(retried.id).not.toBe(failedOfferId);
+      expect(
+        await unitOfWork.offerRepository.getById(
+          "workspace-1",
+          retried.id,
+        ),
+      ).toEqual(retried);
+      expect(
+        await unitOfWork.auditRepository.list("workspace-1"),
+      ).toHaveLength(2);
+    },
+  );
 });
 
 describe("offers schema", () => {
@@ -134,7 +175,7 @@ describe("offers schema", () => {
       listingIndex?.config.columns.map((column) =>
         "name" in column ? column.name : undefined,
       ),
-    ).toEqual(["workspace_id", "created_at"]);
+    ).toEqual(["workspace_id", "created_at", "id"]);
   });
 
   it("constrains ticket bands to supported values", () => {
@@ -142,5 +183,20 @@ describe("offers schema", () => {
       "usd_5k_15k",
       "usd_15k_plus",
     ]);
+  });
+
+  it("checks normalized version and JSON array fields", () => {
+    const checkNames = getTableConfig(offers).checks.map(
+      (constraint) => constraint.name,
+    );
+
+    expect(checkNames).toEqual(
+      expect.arrayContaining([
+        "offers_version_1_check",
+        "offers_problems_json_array_check",
+        "offers_expected_results_json_array_check",
+        "offers_prohibited_claims_json_array_check",
+      ]),
+    );
   });
 });

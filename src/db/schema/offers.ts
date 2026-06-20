@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import {
+  check,
   foreignKey,
   index,
   integer,
@@ -54,6 +56,20 @@ export const offers = pgTable(
     index("offers_workspace_created_at_idx").on(
       table.workspaceId,
       table.createdAt,
+      table.id,
+    ),
+    check("offers_version_1_check", sql`${table.version} = 1`),
+    check(
+      "offers_problems_json_array_check",
+      sql`jsonb_typeof(${table.problems}) = 'array'`,
+    ),
+    check(
+      "offers_expected_results_json_array_check",
+      sql`jsonb_typeof(${table.expectedResults}) = 'array'`,
+    ),
+    check(
+      "offers_prohibited_claims_json_array_check",
+      sql`jsonb_typeof(${table.prohibitedClaims}) = 'array'`,
     ),
   ],
 );

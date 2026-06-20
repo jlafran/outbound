@@ -15,6 +15,13 @@
       "when": 1781920301113,
       "tag": "0001_handy_spot",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781921056581,
+      "tag": "0002_plain_crusher_hogan",
+      "breakpoints": true
     }
   ]
 }
