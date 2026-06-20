@@ -1,9 +1,29 @@
 import { describe, expect, it } from "vitest";
+import { getTableConfig } from "drizzle-orm/pg-core";
 
+import {
+  auditEvents,
+  type JsonValue,
+  workspaceMembers,
+} from "@/db/schema";
 import {
   createMemoryAuditRepository,
   type AuditEventInput,
 } from "@/features/audit/audit-repository";
+
+const validJsonMetadata: JsonValue = {
+  active: true,
+  count: 3,
+  nested: {
+    nullable: null,
+    values: ["text", 2, false, { deeper: "value" }],
+  },
+};
+
+// @ts-expect-error Date instances are not JSON-safe values.
+const invalidJsonMetadata: JsonValue = { createdAt: new Date() };
+
+void invalidJsonMetadata;
 
 function createEvent(
   overrides: Partial<AuditEventInput> = {},
@@ -19,6 +39,15 @@ function createEvent(
 }
 
 describe("createMemoryAuditRepository", () => {
+  it("accepts nested JSON-safe metadata", async () => {
+    const repository = createMemoryAuditRepository();
+    const event = createEvent({ metadata: validJsonMetadata });
+
+    await repository.append(event);
+
+    expect(await repository.list("workspace-1")).toEqual([event]);
+  });
+
   it("lists a workspace's events in insertion order", async () => {
     const repository = createMemoryAuditRepository();
     const firstEvent = createEvent({ entityId: "offer-1" });
@@ -75,5 +104,50 @@ describe("createMemoryAuditRepository", () => {
         },
       }),
     ]);
+  });
+});
+
+describe("auditEvents schema", () => {
+  it("constrains actions to the AuditAction values", () => {
+    expect(auditEvents.action.enumValues).toEqual([
+      "offer.created",
+      "offer.normalized",
+      "campaign.created",
+      "niches.recommended",
+      "company.scored",
+      "dossier.updated",
+      "dossier.exported",
+    ]);
+  });
+
+  it("requires the actor to be a member of the event workspace", () => {
+    const config = getTableConfig(auditEvents);
+    const tenantActorForeignKey = config.foreignKeys.find((foreignKey) => {
+      const reference = foreignKey.reference();
+
+      return (
+        reference.foreignTable === workspaceMembers &&
+        reference.columns.map((column) => column.name).join(",") ===
+          "workspace_id,actor_id"
+      );
+    });
+
+    expect(tenantActorForeignKey?.reference().foreignColumns).toEqual([
+      workspaceMembers.workspaceId,
+      workspaceMembers.userId,
+    ]);
+  });
+
+  it("indexes workspace audit listings deterministically", () => {
+    const config = getTableConfig(auditEvents);
+    const listingIndex = config.indexes.find(
+      (index) => index.config.name === "audit_events_workspace_listing_idx",
+    );
+
+    expect(
+      listingIndex?.config.columns.map((column) =>
+        "name" in column ? column.name : undefined,
+      ),
+    ).toEqual(["workspace_id", "created_at", "id"]);
   });
 });

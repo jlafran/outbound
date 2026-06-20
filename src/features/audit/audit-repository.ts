@@ -1,13 +1,17 @@
-import type { AuditAction } from "@/db/schema/audit";
+import type { AuditAction, JsonValue } from "@/db/schema/audit";
 
-export type { AuditAction } from "@/db/schema/audit";
+export type {
+  AuditAction,
+  JsonPrimitive,
+  JsonValue,
+} from "@/db/schema/audit";
 
 export type AuditEventInput = {
   workspaceId: string;
   actorId: string;
   action: AuditAction;
   entityId: string;
-  metadata: Record<string, unknown>;
+  metadata: JsonValue;
 };
 
 export interface AuditRepository {

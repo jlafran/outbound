@@ -1,5 +1,5 @@
 {
-  "id": "397b49d2-45db-4c34-b309-19ba0b624a06",
+  "id": "c1ae0d64-2a49-4dbf-a978-9ea8d093b661",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -28,7 +28,8 @@
         },
         "action": {
           "name": "action",
-          "type": "text",
+          "type": "audit_action",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
         },
@@ -53,7 +54,35 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "audit_events_workspace_listing_idx": {
+          "name": "audit_events_workspace_listing_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "audit_events_workspace_id_workspaces_id_fk": {
           "name": "audit_events_workspace_id_workspaces_id_fk",
@@ -68,15 +97,17 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "audit_events_actor_id_users_id_fk": {
-          "name": "audit_events_actor_id_users_id_fk",
+        "audit_events_workspace_actor_member_fk": {
+          "name": "audit_events_workspace_actor_member_fk",
           "tableFrom": "audit_events",
-          "tableTo": "users",
+          "tableTo": "workspace_members",
           "columnsFrom": [
+            "workspace_id",
             "actor_id"
           ],
           "columnsTo": [
-            "id"
+            "workspace_id",
+            "user_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -242,6 +273,19 @@
     }
   },
   "enums": {
+    "public.audit_action": {
+      "name": "audit_action",
+      "schema": "public",
+      "values": [
+        "offer.created",
+        "offer.normalized",
+        "campaign.created",
+        "niches.recommended",
+        "company.scored",
+        "dossier.updated",
+        "dossier.exported"
+      ]
+    },
     "public.workspace_role": {
       "name": "workspace_role",
       "schema": "public",
