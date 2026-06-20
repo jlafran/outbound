@@ -24,7 +24,7 @@ export class CampaignService {
   ) {}
 
   async create(input: CreateCampaignInput): Promise<CampaignRecord> {
-    const parsed = campaignInputSchema.parse({
+    const result = campaignInputSchema.safeParse({
       workspaceId: input.workspaceId,
       offerId: input.offerId,
       createdBy: input.actorId,
@@ -32,6 +32,12 @@ export class CampaignService {
       targetDailyEmails: input.targetDailyEmails,
       paidDataMode: input.paidDataMode,
     });
+    if (!result.success) {
+      throw new CampaignError("INVALID_CAMPAIGN_INPUT", {
+        cause: result.error,
+      });
+    }
+    const parsed = result.data;
     const offer = await this.offerRepository.getById(
       parsed.workspaceId,
       parsed.offerId,
@@ -58,32 +64,35 @@ export class CampaignService {
     workspaceId: string,
     campaignId: string,
     ids: string[],
+    expectedVersion: number,
   ): Promise<CampaignRecord> {
     const campaign = await this.requireCampaign(workspaceId, campaignId);
+    this.requireExpectedVersion(campaign, expectedVersion);
     this.requireState(campaign, "draft");
     const uniqueIds = this.requireIds(
       ids,
       "NICHE_RECOMMENDATIONS_REQUIRED",
     );
-    const nextVersion = campaign.version + 1;
 
     return this.campaignRepository.update(
       {
         ...campaign,
         nicheRecommendationIds: uniqueIds,
-        version: nextVersion,
+        version: expectedVersion + 1,
         updatedAt: new Date(),
       },
-      campaign.version,
+      expectedVersion,
     );
   }
 
   async moveToNicheReview(
     workspaceId: string,
     campaignId: string,
+    expectedVersion: number,
   ): Promise<CampaignRecord> {
     const campaign = await this.requireCampaign(workspaceId, campaignId);
 
+    this.requireExpectedVersion(campaign, expectedVersion);
     this.requireState(campaign, "draft");
     if (campaign.nicheRecommendationIds.length === 0) {
       throw new CampaignError("NICHE_RECOMMENDATIONS_REQUIRED");
@@ -93,10 +102,10 @@ export class CampaignService {
       {
         ...campaign,
         state: "niche_review",
-        version: campaign.version + 1,
+        version: expectedVersion + 1,
         updatedAt: new Date(),
       },
-      campaign.version,
+      expectedVersion,
     );
   }
 
@@ -104,8 +113,10 @@ export class CampaignService {
     workspaceId: string,
     campaignId: string,
     ids: string[],
+    expectedVersion: number,
   ): Promise<CampaignRecord> {
     const campaign = await this.requireCampaign(workspaceId, campaignId);
+    this.requireExpectedVersion(campaign, expectedVersion);
     this.requireState(campaign, "niche_review");
     const uniqueIds = this.requireIds(ids, "APPROVED_NICHE_REQUIRED");
     const recommendedIds = new Set(campaign.nicheRecommendationIds);
@@ -118,18 +129,20 @@ export class CampaignService {
       {
         ...campaign,
         approvedNicheIds: uniqueIds,
-        version: campaign.version + 1,
+        version: expectedVersion + 1,
         updatedAt: new Date(),
       },
-      campaign.version,
+      expectedVersion,
     );
   }
 
   async moveToDiscoveryReady(
     workspaceId: string,
     campaignId: string,
+    expectedVersion: number,
   ): Promise<CampaignRecord> {
     const campaign = await this.requireCampaign(workspaceId, campaignId);
+    this.requireExpectedVersion(campaign, expectedVersion);
     this.requireState(campaign, "niche_review");
 
     if (campaign.approvedNicheIds.length === 0) {
@@ -140,10 +153,10 @@ export class CampaignService {
       {
         ...campaign,
         state: "discovery_ready",
-        version: campaign.version + 1,
+        version: expectedVersion + 1,
         updatedAt: new Date(),
       },
-      campaign.version,
+      expectedVersion,
     );
   }
 
@@ -169,6 +182,15 @@ export class CampaignService {
   ): void {
     if (campaign.state !== expectedState) {
       throw new CampaignError("INVALID_CAMPAIGN_TRANSITION");
+    }
+  }
+
+  private requireExpectedVersion(
+    campaign: CampaignRecord,
+    expectedVersion: number,
+  ): void {
+    if (campaign.version !== expectedVersion) {
+      throw new CampaignError("STALE_CAMPAIGN_UPDATE");
     }
   }
 

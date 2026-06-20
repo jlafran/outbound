@@ -85,6 +85,14 @@ export const campaigns = pgTable(
       sql`jsonb_typeof(${table.approvedNicheIds}) = 'array'`,
     ),
     check(
+      "campaigns_review_states_recommendations_check",
+      sql`case when ${table.state} in ('niche_review', 'discovery_ready') then case when jsonb_typeof(${table.nicheRecommendationIds}) = 'array' then jsonb_array_length(${table.nicheRecommendationIds}) > 0 else false end else true end`,
+    ),
+    check(
+      "campaigns_discovery_ready_approved_check",
+      sql`case when ${table.state} = 'discovery_ready' then case when jsonb_typeof(${table.approvedNicheIds}) = 'array' then jsonb_array_length(${table.approvedNicheIds}) > 0 else false end else true end`,
+    ),
+    check(
       "campaigns_version_positive_check",
       sql`${table.version} >= 1`,
     ),

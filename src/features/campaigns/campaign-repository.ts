@@ -27,7 +27,7 @@ export function createMemoryCampaignRepository(
   return {
     async create(record) {
       const stored = structuredClone(campaignRecordSchema.parse(record));
-      records.set(record.id, stored);
+      records.set(stored.id, stored);
       return structuredClone(stored);
     },
     async getById(workspaceId, id) {
@@ -40,19 +40,20 @@ export function createMemoryCampaignRepository(
       return structuredClone(record);
     },
     async update(record, expectedVersion) {
-      const current = records.get(record.id);
+      const parsed = campaignRecordSchema.parse(record);
+      const current = records.get(parsed.id);
 
       if (
         !current ||
-        current.workspaceId !== record.workspaceId ||
+        current.workspaceId !== parsed.workspaceId ||
         current.version !== expectedVersion ||
-        record.version !== expectedVersion + 1
+        parsed.version !== expectedVersion + 1
       ) {
         throw new CampaignError("STALE_CAMPAIGN_UPDATE");
       }
 
-      const stored = structuredClone(campaignRecordSchema.parse(record));
-      records.set(record.id, stored);
+      const stored = structuredClone(parsed);
+      records.set(parsed.id, stored);
       return structuredClone(stored);
     },
   };
@@ -62,40 +63,38 @@ export type CampaignDbExecutor = Pick<
   typeof applicationDb,
   "insert" | "select" | "update"
 >;
-type CampaignRow = typeof campaigns.$inferSelect;
 
-function toCampaignRecord(row: CampaignRow): CampaignRecord {
-  return campaignRecordSchema.parse({
-    id: row.id,
-    workspaceId: row.workspaceId,
-    offerId: row.offerId,
-    createdBy: row.createdBy,
-    name: row.name,
-    targetDailyEmails: row.targetDailyEmails,
-    paidDataMode: row.paidDataMode,
-    state: row.state,
-    nicheRecommendationIds: row.nicheRecommendationIds,
-    approvedNicheIds: row.approvedNicheIds,
-    version: row.version,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  });
+export type CampaignIdentity = {
+  workspaceId: string;
+  id: string;
+};
+
+export type CampaignCasUpdate = CampaignIdentity & {
+  expectedVersion: number;
+  record: CampaignRecord;
+};
+
+export interface CampaignPersistenceExecutor {
+  insert(record: CampaignRecord): Promise<unknown>;
+  getByIdentity(identity: CampaignIdentity): Promise<unknown | null>;
+  updateByIdentityAndVersion(
+    input: CampaignCasUpdate,
+  ): Promise<unknown | null>;
 }
 
-export function createDrizzleCampaignRepository(
+export function createDrizzleCampaignPersistenceExecutor(
   database: CampaignDbExecutor,
-): CampaignRepository {
+): CampaignPersistenceExecutor {
   return {
-    async create(record) {
-      const parsed = campaignRecordSchema.parse(record);
+    async insert(record) {
       const [created] = await database
         .insert(campaigns)
-        .values(parsed)
+        .values(record)
         .returning();
 
-      return toCampaignRecord(created);
+      return created;
     },
-    async getById(workspaceId, id) {
+    async getByIdentity({ workspaceId, id }) {
       const [record] = await database
         .select()
         .from(campaigns)
@@ -107,7 +106,42 @@ export function createDrizzleCampaignRepository(
         )
         .limit(1);
 
-      return record ? toCampaignRecord(record) : null;
+      return record ?? null;
+    },
+    async updateByIdentityAndVersion({
+      workspaceId,
+      id,
+      expectedVersion,
+      record,
+    }) {
+      const [updated] = await database
+        .update(campaigns)
+        .set(record)
+        .where(
+          and(
+            eq(campaigns.workspaceId, workspaceId),
+            eq(campaigns.id, id),
+            eq(campaigns.version, expectedVersion),
+          ),
+        )
+        .returning();
+
+      return updated ?? null;
+    },
+  };
+}
+
+export function createDrizzleCampaignRepository(
+  executor: CampaignPersistenceExecutor,
+): CampaignRepository {
+  return {
+    async create(record) {
+      const parsed = campaignRecordSchema.parse(record);
+      return campaignRecordSchema.parse(await executor.insert(parsed));
+    },
+    async getById(workspaceId, id) {
+      const record = await executor.getByIdentity({ workspaceId, id });
+      return record === null ? null : campaignRecordSchema.parse(record);
     },
     async update(record, expectedVersion) {
       const parsed = campaignRecordSchema.parse(record);
@@ -116,23 +150,18 @@ export function createDrizzleCampaignRepository(
         throw new CampaignError("STALE_CAMPAIGN_UPDATE");
       }
 
-      const [updated] = await database
-        .update(campaigns)
-        .set(parsed)
-        .where(
-          and(
-            eq(campaigns.workspaceId, parsed.workspaceId),
-            eq(campaigns.id, parsed.id),
-            eq(campaigns.version, expectedVersion),
-          ),
-        )
-        .returning();
+      const updated = await executor.updateByIdentityAndVersion({
+        workspaceId: parsed.workspaceId,
+        id: parsed.id,
+        expectedVersion,
+        record: parsed,
+      });
 
-      if (!updated) {
+      if (updated === null) {
         throw new CampaignError("STALE_CAMPAIGN_UPDATE");
       }
 
-      return toCampaignRecord(updated);
+      return campaignRecordSchema.parse(updated);
     },
   };
 }

@@ -7,9 +7,12 @@ import {
   workspaceMembers,
 } from "@/db/schema";
 import {
+  createDrizzleCampaignRepository,
   createMemoryCampaignRepository,
+  type CampaignPersistenceExecutor,
 } from "@/features/campaigns/campaign-repository";
 import {
+  campaignRecordSchema,
   campaignStateValues,
   paidDataModeValues,
   type CampaignRecord,
@@ -64,12 +67,17 @@ async function createDraft(
 
 async function createNicheReview(service: CampaignService) {
   const campaign = await createDraft(service);
-  await service.recordNicheRecommendations(
+  const recommended = await service.recordNicheRecommendations(
     campaign.workspaceId,
     campaign.id,
     ["niche-1", "niche-2"],
+    campaign.version,
   );
-  return service.moveToNicheReview(campaign.workspaceId, campaign.id);
+  return service.moveToNicheReview(
+    campaign.workspaceId,
+    campaign.id,
+    recommended.version,
+  );
 }
 
 function expectCode(code: string) {
@@ -106,7 +114,7 @@ describe("CampaignService", () => {
 
       await expect(
         createDraft(service, { targetDailyEmails }),
-      ).rejects.toThrow();
+      ).rejects.toEqual(expectCode("INVALID_CAMPAIGN_INPUT"));
     },
   );
 
@@ -132,6 +140,7 @@ describe("CampaignService", () => {
       campaign.workspaceId,
       campaign.id,
       ["niche-1", "niche-1", "niche-2"],
+      campaign.version,
     );
 
     expect(updated.nicheRecommendationIds).toEqual([
@@ -143,6 +152,7 @@ describe("CampaignService", () => {
         campaign.workspaceId,
         campaign.id,
         [],
+        updated.version,
       ),
     ).rejects.toEqual(expectCode("NICHE_RECOMMENDATIONS_REQUIRED"));
     await expect(
@@ -150,15 +160,21 @@ describe("CampaignService", () => {
         campaign.workspaceId,
         campaign.id,
         ["niche-1", ""],
+        updated.version,
       ),
     ).rejects.toEqual(expectCode("NICHE_RECOMMENDATIONS_REQUIRED"));
 
-    await service.moveToNicheReview(campaign.workspaceId, campaign.id);
+    const reviewed = await service.moveToNicheReview(
+      campaign.workspaceId,
+      campaign.id,
+      updated.version,
+    );
     await expect(
       service.recordNicheRecommendations(
         campaign.workspaceId,
         campaign.id,
         ["niche-3"],
+        reviewed.version,
       ),
     ).rejects.toEqual(expectCode("INVALID_CAMPAIGN_TRANSITION"));
   });
@@ -168,7 +184,11 @@ describe("CampaignService", () => {
     const campaign = await createDraft(service);
 
     await expect(
-      service.moveToNicheReview(campaign.workspaceId, campaign.id),
+      service.moveToNicheReview(
+        campaign.workspaceId,
+        campaign.id,
+        campaign.version,
+      ),
     ).rejects.toEqual(
       expectCode("NICHE_RECOMMENDATIONS_REQUIRED"),
     );
@@ -178,17 +198,20 @@ describe("CampaignService", () => {
     const { service } = await createHarness();
     const campaign = await createDraft(service);
 
-    await service.recordNicheRecommendations(
+    const recommended = await service.recordNicheRecommendations(
       "workspace-1",
       campaign.id,
       ["niche-1"],
+      campaign.version,
     );
     const reviewed = await service.moveToNicheReview(
       "workspace-1",
       campaign.id,
+      recommended.version,
     );
 
     expect(reviewed.state).toBe("niche_review");
+    expect(reviewed.version).toBe(3);
   });
 
   it("approves a unique nonempty subset of recommended niches", async () => {
@@ -199,16 +222,26 @@ describe("CampaignService", () => {
       reviewed.workspaceId,
       reviewed.id,
       ["niche-2", "niche-2"],
+      reviewed.version,
     );
 
     expect(approved.approvedNicheIds).toEqual(["niche-2"]);
+    expect(approved.version).toBe(reviewed.version + 1);
     await expect(
-      service.approveNiches(reviewed.workspaceId, reviewed.id, []),
+      service.approveNiches(
+        reviewed.workspaceId,
+        reviewed.id,
+        [],
+        approved.version,
+      ),
     ).rejects.toEqual(expectCode("APPROVED_NICHE_REQUIRED"));
     await expect(
-      service.approveNiches(reviewed.workspaceId, reviewed.id, [
-        "niche-3",
-      ]),
+      service.approveNiches(
+        reviewed.workspaceId,
+        reviewed.id,
+        ["niche-3"],
+        approved.version,
+      ),
     ).rejects.toEqual(expectCode("NICHE_NOT_RECOMMENDED"));
   });
 
@@ -217,9 +250,12 @@ describe("CampaignService", () => {
     const campaign = await createDraft(service);
 
     await expect(
-      service.approveNiches(campaign.workspaceId, campaign.id, [
-        "niche-1",
-      ]),
+      service.approveNiches(
+        campaign.workspaceId,
+        campaign.id,
+        ["niche-1"],
+        campaign.version,
+      ),
     ).rejects.toEqual(expectCode("INVALID_CAMPAIGN_TRANSITION"));
   });
 
@@ -231,6 +267,7 @@ describe("CampaignService", () => {
       service.moveToDiscoveryReady(
         reviewed.workspaceId,
         reviewed.id,
+        reviewed.version,
       ),
     ).rejects.toEqual(expectCode("APPROVED_NICHE_REQUIRED"));
   });
@@ -238,18 +275,27 @@ describe("CampaignService", () => {
   it("completes the valid phase 1 flow at discovery ready", async () => {
     const { service } = await createHarness();
     const reviewed = await createNicheReview(service);
-    await service.approveNiches(reviewed.workspaceId, reviewed.id, [
-      "niche-1",
-    ]);
+    const approved = await service.approveNiches(
+      reviewed.workspaceId,
+      reviewed.id,
+      ["niche-1"],
+      reviewed.version,
+    );
 
     const ready = await service.moveToDiscoveryReady(
       reviewed.workspaceId,
       reviewed.id,
+      approved.version,
     );
 
     expect(ready.state).toBe("discovery_ready");
+    expect(ready.version).toBe(approved.version + 1);
     await expect(
-      service.moveToDiscoveryReady(ready.workspaceId, ready.id),
+      service.moveToDiscoveryReady(
+        ready.workspaceId,
+        ready.id,
+        ready.version,
+      ),
     ).rejects.toEqual(expectCode("INVALID_CAMPAIGN_TRANSITION"));
     expect(
       "moveToResearching" in service ||
@@ -270,6 +316,7 @@ describe("CampaignService", () => {
         "workspace-2",
         campaign.id,
         ["niche-1"],
+        campaign.version,
       ),
     ).rejects.toEqual(expectCode("CAMPAIGN_NOT_FOUND"));
   });
@@ -283,6 +330,7 @@ describe("CampaignService", () => {
       campaign.workspaceId,
       campaign.id,
       recommendations,
+      campaign.version,
     );
     recommendations.push("changed-input");
     updated.nicheRecommendationIds.push("changed-output");
@@ -296,9 +344,55 @@ describe("CampaignService", () => {
       )?.nicheRecommendationIds,
     ).toEqual(["niche-1"]);
   });
+
+  it("rejects a stale caller version even when the request starts after a commit", async () => {
+    const { service } = await createHarness();
+    const campaign = await createDraft(service);
+
+    const winner = await service.recordNicheRecommendations(
+      campaign.workspaceId,
+      campaign.id,
+      ["niche-1"],
+      campaign.version,
+    );
+
+    await expect(
+      service.recordNicheRecommendations(
+        campaign.workspaceId,
+        campaign.id,
+        ["niche-2"],
+        campaign.version,
+      ),
+    ).rejects.toEqual(expectCode("STALE_CAMPAIGN_UPDATE"));
+    expect(winner.version).toBe(campaign.version + 1);
+  });
 });
 
 describe("createMemoryCampaignRepository", () => {
+  it("parses and normalizes records at persistence boundaries", async () => {
+    const repository = createMemoryCampaignRepository();
+    const created = await repository.create(
+      createCampaignRecord({
+        name: "  Argentina SaaS  ",
+        nicheRecommendationIds: [" niche-1 ", "niche-1"],
+      }),
+    );
+
+    expect(created.name).toBe("Argentina SaaS");
+    expect(created.nicheRecommendationIds).toEqual(["niche-1"]);
+    await expect(
+      repository.update(
+        {
+          ...created,
+          state: "discovery_ready",
+          approvedNicheIds: [],
+          version: created.version + 1,
+        },
+        created.version,
+      ),
+    ).rejects.toThrow();
+  });
+
   it("rejects a stale concurrent update without losing the winner", async () => {
     const repository = createMemoryCampaignRepository();
     const original = await repository.create(
@@ -338,7 +432,157 @@ describe("createMemoryCampaignRepository", () => {
   });
 });
 
+describe("createDrizzleCampaignRepository", () => {
+  it("passes workspace identity and expected version to the executor", async () => {
+    const calls: {
+      get?: { workspaceId: string; id: string };
+      update?: {
+        workspaceId: string;
+        id: string;
+        expectedVersion: number;
+        record: CampaignRecord;
+      };
+    } = {};
+    const stored = createCampaignRecord();
+    const executor: CampaignPersistenceExecutor = {
+      async insert(record) {
+        return record;
+      },
+      async getByIdentity(identity) {
+        calls.get = identity;
+        return stored;
+      },
+      async updateByIdentityAndVersion(input) {
+        calls.update = input;
+        return input.record;
+      },
+    };
+    const repository = createDrizzleCampaignRepository(executor);
+
+    await repository.getById("workspace-1", "campaign-1");
+    const updated = await repository.update(
+      { ...stored, name: "Updated", version: 2 },
+      1,
+    );
+
+    expect(calls.get).toEqual({
+      workspaceId: "workspace-1",
+      id: "campaign-1",
+    });
+    expect(calls.update).toMatchObject({
+      workspaceId: "workspace-1",
+      id: "campaign-1",
+      expectedVersion: 1,
+      record: { version: 2 },
+    });
+    expect(updated.version).toBe(2);
+  });
+
+  it("maps a zero-row CAS update to a stable stale error", async () => {
+    const executor: CampaignPersistenceExecutor = {
+      async insert(record) {
+        return record;
+      },
+      async getByIdentity() {
+        return null;
+      },
+      async updateByIdentityAndVersion() {
+        return null;
+      },
+    };
+    const repository = createDrizzleCampaignRepository(executor);
+
+    expect(
+      await repository.getById("workspace-1", "missing"),
+    ).toBeNull();
+    await expect(
+      repository.update(
+        createCampaignRecord({ version: 2 }),
+        1,
+      ),
+    ).rejects.toEqual(expectCode("STALE_CAMPAIGN_UPDATE"));
+  });
+
+  it("validates rows returned by the executor", async () => {
+    const executor: CampaignPersistenceExecutor = {
+      async insert() {
+        return createCampaignRecord({
+          state: "discovery_ready",
+        });
+      },
+      async getByIdentity() {
+        return createCampaignRecord({
+          state: "niche_review",
+        });
+      },
+      async updateByIdentityAndVersion() {
+        return null;
+      },
+    };
+    const repository = createDrizzleCampaignRepository(executor);
+
+    await expect(
+      repository.create(createCampaignRecord()),
+    ).rejects.toThrow();
+    await expect(
+      repository.getById("workspace-1", "campaign-1"),
+    ).rejects.toThrow();
+  });
+});
+
 describe("campaign schema", () => {
+  it("normalizes names and unique nonblank niche IDs", () => {
+    const parsed = campaignRecordSchema.parse(
+      createCampaignRecord({
+        name: "  Argentina SaaS  ",
+        nicheRecommendationIds: [
+          " niche-1 ",
+          "niche-1",
+          "niche-2",
+        ],
+        approvedNicheIds: [" niche-1 ", "niche-1"],
+      }),
+    );
+
+    expect(parsed.name).toBe("Argentina SaaS");
+    expect(parsed.nicheRecommendationIds).toEqual([
+      "niche-1",
+      "niche-2",
+    ]);
+    expect(parsed.approvedNicheIds).toEqual(["niche-1"]);
+    expect(() =>
+      campaignRecordSchema.parse(
+        createCampaignRecord({
+          nicheRecommendationIds: ["niche-1", " "],
+        }),
+      ),
+    ).toThrow();
+  });
+
+  it("enforces approved subsets and state snapshot invariants", () => {
+    expect(() =>
+      campaignRecordSchema.parse(
+        createCampaignRecord({
+          nicheRecommendationIds: ["niche-1"],
+          approvedNicheIds: ["niche-2"],
+        }),
+      ),
+    ).toThrow();
+    expect(() =>
+      campaignRecordSchema.parse(
+        createCampaignRecord({ state: "niche_review" }),
+      ),
+    ).toThrow();
+    expect(() =>
+      campaignRecordSchema.parse(
+        createCampaignRecord({
+          state: "discovery_ready",
+          nicheRecommendationIds: ["niche-1"],
+        }),
+      ),
+    ).toThrow();
+  });
+
   it("defines the exact campaign states and paid data modes", () => {
     expect(campaignStateValues).toEqual([
       "draft",
@@ -401,7 +645,7 @@ describe("campaign schema", () => {
     ).toEqual(["workspace_id", "created_at", "id"]);
   });
 
-  it("checks target volume, JSON arrays, and optimistic version", () => {
+  it("checks target volume, JSON arrays, state snapshots, and optimistic version", () => {
     const checkNames = getTableConfig(campaigns).checks.map(
       (constraint) => constraint.name,
     );
@@ -411,6 +655,8 @@ describe("campaign schema", () => {
         "campaigns_target_daily_emails_check",
         "campaigns_niche_recommendation_ids_json_array_check",
         "campaigns_approved_niche_ids_json_array_check",
+        "campaigns_review_states_recommendations_check",
+        "campaigns_discovery_ready_approved_check",
         "campaigns_version_positive_check",
       ]),
     );
