@@ -9,6 +9,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 import {
@@ -70,6 +71,10 @@ export const campaigns = pgTable(
     index("campaigns_workspace_created_at_id_idx").on(
       table.workspaceId,
       table.createdAt,
+      table.id,
+    ),
+    uniqueIndex("campaigns_workspace_id_unique").on(
+      table.workspaceId,
       table.id,
     ),
     check(
