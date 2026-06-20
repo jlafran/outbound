@@ -21,6 +21,8 @@ import {
   CampaignService,
   type CreateCampaignInput,
 } from "@/features/campaigns/campaign-service";
+import { createMemoryCampaignUnitOfWork } from "@/features/campaigns/campaign-unit-of-work";
+import { FakeNicheAdvisor } from "@/features/niches/fake-niche-advisor";
 import { createMemoryOfferRepository } from "@/features/offers/offer-repository";
 import { normalizedOffer } from "../fixtures/offer";
 
@@ -49,12 +51,18 @@ async function createHarness() {
     ...normalizedOffer,
     createdAt: new Date("2026-06-19T12:00:00.000Z"),
   });
-  const campaignRepository = createMemoryCampaignRepository();
+  const unitOfWork = createMemoryCampaignUnitOfWork();
+  const campaignRepository = unitOfWork.campaignRepository;
 
   return {
     campaignRepository,
     offerRepository,
-    service: new CampaignService(campaignRepository, offerRepository),
+    service: new CampaignService(
+      campaignRepository,
+      offerRepository,
+      new FakeNicheAdvisor(),
+      unitOfWork,
+    ),
   };
 }
 
@@ -223,6 +231,7 @@ describe("CampaignService", () => {
       reviewed.id,
       ["niche-2", "niche-2"],
       reviewed.version,
+      "user-1",
     );
 
     expect(approved.approvedNicheIds).toEqual(["niche-2"]);
@@ -233,6 +242,7 @@ describe("CampaignService", () => {
         reviewed.id,
         [],
         approved.version,
+        "user-1",
       ),
     ).rejects.toEqual(expectCode("APPROVED_NICHE_REQUIRED"));
     await expect(
@@ -241,6 +251,7 @@ describe("CampaignService", () => {
         reviewed.id,
         ["niche-3"],
         approved.version,
+        "user-1",
       ),
     ).rejects.toEqual(expectCode("NICHE_NOT_RECOMMENDED"));
   });
@@ -255,6 +266,7 @@ describe("CampaignService", () => {
         campaign.id,
         ["niche-1"],
         campaign.version,
+        "user-1",
       ),
     ).rejects.toEqual(expectCode("INVALID_CAMPAIGN_TRANSITION"));
   });
@@ -280,6 +292,7 @@ describe("CampaignService", () => {
       reviewed.id,
       ["niche-1"],
       reviewed.version,
+      "user-1",
     );
 
     const ready = await service.moveToDiscoveryReady(

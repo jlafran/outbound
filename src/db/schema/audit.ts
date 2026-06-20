@@ -16,6 +16,7 @@ export const auditActionValues = [
   "offer.normalized",
   "campaign.created",
   "niches.recommended",
+  "niches.approved",
   "company.scored",
   "dossier.updated",
   "dossier.exported",

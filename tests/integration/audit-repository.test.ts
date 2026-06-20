@@ -153,6 +153,7 @@ describe("auditEvents schema", () => {
       "offer.normalized",
       "campaign.created",
       "niches.recommended",
+      "niches.approved",
       "company.scored",
       "dossier.updated",
       "dossier.exported",

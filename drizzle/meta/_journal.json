@@ -43,6 +43,13 @@
       "when": 1781922432387,
       "tag": "0005_light_moira_mactaggert",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781923083576,
+      "tag": "0006_absurd_nicolaos",
+      "breakpoints": true
     }
   ]
 }
