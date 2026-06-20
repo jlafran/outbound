@@ -7,8 +7,12 @@ import {
 import { createMemoryCampaignUnitOfWork } from "@/features/campaigns/campaign-unit-of-work";
 import type { NicheAdvisor } from "@/features/niches/niche-advisor";
 import { FakeNicheAdvisor } from "@/features/niches/fake-niche-advisor";
-import { nicheRecommendationSchema } from "@/features/niches/niche-schema";
+import {
+  calculateNicheScore,
+  nicheRecommendationSchema,
+} from "@/features/niches/niche-schema";
 import { createMemoryOfferRepository } from "@/features/offers/offer-repository";
+import type { NormalizedOffer } from "@/features/offers/offer-schema";
 import { normalizedOffer } from "../fixtures/offer";
 
 const campaignInput: CreateCampaignInput = {
@@ -23,6 +27,7 @@ const campaignInput: CreateCampaignInput = {
 async function createCampaignHarness(
   options: Parameters<typeof createMemoryCampaignUnitOfWork>[0] = {},
   advisor: NicheAdvisor = new FakeNicheAdvisor(),
+  offer: NormalizedOffer = normalizedOffer,
 ) {
   const unitOfWork = createMemoryCampaignUnitOfWork(options);
   const offerRepository = createMemoryOfferRepository();
@@ -30,7 +35,7 @@ async function createCampaignHarness(
     id: "offer-1",
     workspaceId: "workspace-1",
     createdBy: "user-1",
-    ...normalizedOffer,
+    ...offer,
     createdAt: new Date("2026-06-19T12:00:00.000Z"),
   });
   const service = new CampaignService(
@@ -76,6 +81,24 @@ describe("FakeNicheAdvisor", () => {
     expect(recommendations[1].score).toBeGreaterThan(
       recommendations[2].score,
     );
+    expect(
+      recommendations.map(
+        ({
+          capacityToPay,
+          problemMagnitude,
+          urgency,
+          roiClarity,
+          decisionMakerAccess,
+        }) =>
+          calculateNicheScore({
+            capacityToPay,
+            problemMagnitude,
+            urgency,
+            roiClarity,
+            decisionMakerAccess,
+          }),
+      ),
+    ).toEqual(recommendations.map(({ score }) => score));
   });
 
   it("ties its reasoning to the offer economics without prohibited claims", async () => {
@@ -111,6 +134,18 @@ describe("FakeNicheAdvisor", () => {
 });
 
 describe("nicheRecommendationSchema", () => {
+  it("calculates the weighted niche score and rounds to two decimals", () => {
+    expect(
+      calculateNicheScore({
+        capacityToPay: 92,
+        problemMagnitude: 94,
+        urgency: 91,
+        roiClarity: 93,
+        decisionMakerAccess: 84,
+      }),
+    ).toBe(91.75);
+  });
+
   it("enforces score, count, identity, and reasoning boundaries", () => {
     const valid = {
       id: "logistica-ar",
@@ -128,6 +163,9 @@ describe("nicheRecommendationSchema", () => {
 
     expect(nicheRecommendationSchema.parse(valid)).toEqual(valid);
     expect(() =>
+      nicheRecommendationSchema.parse({ ...valid, score: 90.01 }),
+    ).toThrow();
+    expect(() =>
       nicheRecommendationSchema.parse({ ...valid, id: " " }),
     ).toThrow();
     expect(() =>
@@ -137,6 +175,17 @@ describe("nicheRecommendationSchema", () => {
       nicheRecommendationSchema.parse({
         ...valid,
         capacityToPay: -1,
+      }),
+    ).toThrow();
+    expect(() =>
+      nicheRecommendationSchema.parse({
+        ...valid,
+        score: 100,
+        capacityToPay: 0,
+        problemMagnitude: 0,
+        urgency: 0,
+        roiClarity: 0,
+        decisionMakerAccess: 0,
       }),
     ).toThrow();
     expect(() =>
@@ -227,6 +276,128 @@ describe("CampaignService niche recommendations", () => {
       ),
     ).rejects.toEqual(
       expect.objectContaining({ code: "INVALID_NICHE_RECOMMENDATIONS" }),
+    );
+  });
+
+  it("rejects reasoning containing a normalized prohibited claim", async () => {
+    const offer = {
+      ...normalizedOffer,
+      prohibitedClaims: ["Exclusive market proof"],
+    };
+    const recommendations = await new FakeNicheAdvisor().recommend(offer);
+    recommendations[0].reasoning =
+      "Pipeline stalls remains relevant, but EXCLUSIVE   MARKET proof is unsafe.";
+    const advisor: NicheAdvisor = {
+      async recommend() {
+        return recommendations;
+      },
+    };
+    const { service, unitOfWork } = await createCampaignHarness(
+      {},
+      advisor,
+      offer,
+    );
+    const campaign = await service.create(campaignInput);
+
+    await expect(
+      service.recommendNiches(
+        campaign.workspaceId,
+        campaign.id,
+        "user-1",
+        campaign.version,
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining({ code: "UNSAFE_NICHE_RECOMMENDATION" }),
+    );
+    expect(
+      await unitOfWork.campaignRepository.getById(
+        campaign.workspaceId,
+        campaign.id,
+      ),
+    ).toEqual(campaign);
+  });
+
+  it("rejects a substantial verbatim raw offer excerpt", async () => {
+    const recommendations = await new FakeNicheAdvisor().recommend(
+      normalizedOffer,
+    );
+    recommendations[0].reasoning =
+      `${normalizedOffer.rawText} Pipeline stalls remains the target problem.`;
+    const advisor: NicheAdvisor = {
+      async recommend() {
+        return recommendations;
+      },
+    };
+    const { service } = await createCampaignHarness({}, advisor);
+    const campaign = await service.create(campaignInput);
+
+    await expect(
+      service.recommendNiches(
+        campaign.workspaceId,
+        campaign.id,
+        "user-1",
+        campaign.version,
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining({ code: "UNSAFE_NICHE_RECOMMENDATION" }),
+    );
+  });
+
+  it.each([
+    "Pipeline stalls could improve conversion by 37% for this niche.",
+    "Pipeline stalls could reduce cycle time by 12 days for this niche.",
+    "Pipeline stalls could produce USD 4,000 in savings for this niche.",
+    "Pipeline stalls could produce €4,000 for this niche.",
+    "Pipeline stalls is guaranteed to improve for this niche.",
+    "Pipeline stalls could save 20 hours for this niche.",
+  ])("rejects unsupported protected claims: %s", async (reasoning) => {
+    const recommendations = await new FakeNicheAdvisor().recommend(
+      normalizedOffer,
+    );
+    recommendations[0].reasoning = reasoning;
+    const advisor: NicheAdvisor = {
+      async recommend() {
+        return recommendations;
+      },
+    };
+    const { service } = await createCampaignHarness({}, advisor);
+    const campaign = await service.create(campaignInput);
+
+    await expect(
+      service.recommendNiches(
+        campaign.workspaceId,
+        campaign.id,
+        "user-1",
+        campaign.version,
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining({ code: "UNSAFE_NICHE_RECOMMENDATION" }),
+    );
+  });
+
+  it("rejects reasoning ungrounded in approved problems or results", async () => {
+    const recommendations = await new FakeNicheAdvisor().recommend(
+      normalizedOffer,
+    );
+    recommendations[0].reasoning =
+      "This niche has attractive operating characteristics and accessible leadership.";
+    const advisor: NicheAdvisor = {
+      async recommend() {
+        return recommendations;
+      },
+    };
+    const { service } = await createCampaignHarness({}, advisor);
+    const campaign = await service.create(campaignInput);
+
+    await expect(
+      service.recommendNiches(
+        campaign.workspaceId,
+        campaign.id,
+        "user-1",
+        campaign.version,
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining({ code: "UNSAFE_NICHE_RECOMMENDATION" }),
     );
   });
 

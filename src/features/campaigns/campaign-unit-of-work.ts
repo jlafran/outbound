@@ -50,16 +50,52 @@ export function createMemoryCampaignUnitOfWork(
 ): MemoryCampaignUnitOfWork {
   const committedCampaigns = new Map<string, CampaignRecord>();
   const committedEvents: AuditEventInput[] = [];
-  const campaignRepository =
+  const committedCampaignRepository =
     createMemoryCampaignRepository(committedCampaigns);
-  const auditRepository = createMemoryAuditRepository(committedEvents);
+  const committedAuditRepository =
+    createMemoryAuditRepository(committedEvents);
   let transactionQueue = Promise.resolve();
+
+  function enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = transactionQueue.then(operation);
+
+    transactionQueue = queued.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    return queued;
+  }
+
+  const campaignRepository: CampaignRepository = {
+    create(record) {
+      return enqueue(() => committedCampaignRepository.create(record));
+    },
+    async getById(workspaceId, id) {
+      await transactionQueue;
+      return committedCampaignRepository.getById(workspaceId, id);
+    },
+    update(record, expectedVersion) {
+      return enqueue(() =>
+        committedCampaignRepository.update(record, expectedVersion),
+      );
+    },
+  };
+  const auditRepository: AuditRepository = {
+    append(input) {
+      return enqueue(() => committedAuditRepository.append(input));
+    },
+    async list(workspaceId) {
+      await transactionQueue;
+      return committedAuditRepository.list(workspaceId);
+    },
+  };
 
   return {
     campaignRepository,
     auditRepository,
     run(operation) {
-      const transaction = transactionQueue.then(async () => {
+      return enqueue(async () => {
         const stagedCampaigns = cloneCampaignRecords(
           committedCampaigns,
         );
@@ -96,13 +132,6 @@ export function createMemoryCampaignUnitOfWork(
 
         return result;
       });
-
-      transactionQueue = transaction.then(
-        () => undefined,
-        () => undefined,
-      );
-
-      return transaction;
     },
   };
 }

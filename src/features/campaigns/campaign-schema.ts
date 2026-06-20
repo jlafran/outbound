@@ -86,7 +86,8 @@ export type CampaignErrorCode =
   | "NICHE_NOT_RECOMMENDED"
   | "NICHE_RECOMMENDATIONS_REQUIRED"
   | "OFFER_REQUIRED"
-  | "STALE_CAMPAIGN_UPDATE";
+  | "STALE_CAMPAIGN_UPDATE"
+  | "UNSAFE_NICHE_RECOMMENDATION";
 
 export class CampaignError extends Error {
   constructor(

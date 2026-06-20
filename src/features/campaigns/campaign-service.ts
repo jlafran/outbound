@@ -6,6 +6,7 @@ import {
   rankedNicheRecommendationListSchema,
   type NicheRecommendation,
 } from "@/features/niches/niche-schema";
+import { areNicheRecommendationsSafe } from "@/features/niches/niche-safety";
 
 import type {
   CampaignInput,
@@ -131,6 +132,9 @@ export class CampaignService {
       });
     }
     const recommendations = recommendationResult.data;
+    if (!areNicheRecommendationsSafe(offer, recommendations)) {
+      throw new CampaignError("UNSAFE_NICHE_RECOMMENDATION");
+    }
     const recommendationIds = recommendations.map(({ id }) => id);
 
     const updated = await this.unitOfWork.run(

@@ -445,6 +445,184 @@ describe("createMemoryCampaignRepository", () => {
   });
 });
 
+describe("createMemoryCampaignUnitOfWork", () => {
+  it("serializes exposed repository creates and updates with audited work", async () => {
+    let releaseAudit!: () => void;
+    let signalAuditReached!: () => void;
+    const auditReached = new Promise<void>((resolve) => {
+      signalAuditReached = resolve;
+    });
+    const auditRelease = new Promise<void>((resolve) => {
+      releaseAudit = resolve;
+    });
+    const unitOfWork = createMemoryCampaignUnitOfWork({
+      async beforeAuditAppend() {
+        signalAuditReached();
+        await auditRelease;
+      },
+    });
+    const audited = await unitOfWork.campaignRepository.create(
+      createCampaignRecord({ id: "audited" }),
+    );
+    const directlyUpdated = await unitOfWork.campaignRepository.create(
+      createCampaignRecord({ id: "direct-update" }),
+    );
+
+    const transaction = unitOfWork.run(
+      async ({ campaignRepository, auditRepository }) => {
+        const updated = await campaignRepository.update(
+          {
+            ...audited,
+            name: "Audited update",
+            version: 2,
+          },
+          1,
+        );
+        await auditRepository.append({
+          workspaceId: audited.workspaceId,
+          actorId: "user-1",
+          action: "campaign.created",
+          entityId: audited.id,
+          metadata: {},
+        });
+        return updated;
+      },
+    );
+    await auditReached;
+
+    const directCreate = unitOfWork.campaignRepository.create(
+      createCampaignRecord({ id: "direct-create" }),
+    );
+    const directUpdate = unitOfWork.campaignRepository.update(
+      {
+        ...directlyUpdated,
+        name: "Direct update",
+        version: 2,
+      },
+      1,
+    );
+    releaseAudit();
+    await Promise.all([transaction, directCreate, directUpdate]);
+
+    expect(
+      await unitOfWork.campaignRepository.getById(
+        audited.workspaceId,
+        audited.id,
+      ),
+    ).toMatchObject({ name: "Audited update", version: 2 });
+    expect(
+      await unitOfWork.campaignRepository.getById(
+        audited.workspaceId,
+        "direct-create",
+      ),
+    ).not.toBeNull();
+    expect(
+      await unitOfWork.campaignRepository.getById(
+        directlyUpdated.workspaceId,
+        directlyUpdated.id,
+      ),
+    ).toMatchObject({ name: "Direct update", version: 2 });
+  });
+
+  it("serializes exposed audit appends with audited work", async () => {
+    let releaseAudit!: () => void;
+    let signalAuditReached!: () => void;
+    const auditReached = new Promise<void>((resolve) => {
+      signalAuditReached = resolve;
+    });
+    const auditRelease = new Promise<void>((resolve) => {
+      releaseAudit = resolve;
+    });
+    const unitOfWork = createMemoryCampaignUnitOfWork({
+      async beforeAuditAppend() {
+        signalAuditReached();
+        await auditRelease;
+      },
+    });
+    const campaign = await unitOfWork.campaignRepository.create(
+      createCampaignRecord({ id: "audited" }),
+    );
+
+    const transaction = unitOfWork.run(
+      async ({ auditRepository }) => {
+        await auditRepository.append({
+          workspaceId: campaign.workspaceId,
+          actorId: "user-1",
+          action: "campaign.created",
+          entityId: campaign.id,
+          metadata: { source: "transaction" },
+        });
+      },
+    );
+    await auditReached;
+
+    const directAppend = unitOfWork.auditRepository.append({
+      workspaceId: campaign.workspaceId,
+      actorId: "user-1",
+      action: "campaign.created",
+      entityId: "direct",
+      metadata: { source: "direct" },
+    });
+    releaseAudit();
+    await Promise.all([transaction, directAppend]);
+
+    expect(
+      await unitOfWork.auditRepository.list(campaign.workspaceId),
+    ).toEqual([
+      expect.objectContaining({ entityId: campaign.id }),
+      expect.objectContaining({ entityId: "direct" }),
+    ]);
+  });
+
+  it("continues exposed repository operations after an audited rejection", async () => {
+    let releaseAudit!: () => void;
+    let signalAuditReached!: () => void;
+    const auditReached = new Promise<void>((resolve) => {
+      signalAuditReached = resolve;
+    });
+    const auditRelease = new Promise<void>((resolve) => {
+      releaseAudit = resolve;
+    });
+    const unitOfWork = createMemoryCampaignUnitOfWork({
+      async beforeAuditAppend() {
+        signalAuditReached();
+        await auditRelease;
+        throw new Error("audit rejected");
+      },
+    });
+    const campaign = await unitOfWork.campaignRepository.create(
+      createCampaignRecord({ id: "audited" }),
+    );
+    const transaction = unitOfWork.run(
+      async ({ auditRepository }) => {
+        await auditRepository.append({
+          workspaceId: campaign.workspaceId,
+          actorId: "user-1",
+          action: "campaign.created",
+          entityId: campaign.id,
+          metadata: {},
+        });
+      },
+    );
+    await auditReached;
+
+    let directCreateSettled = false;
+    const directCreate = unitOfWork.campaignRepository
+      .create(createCampaignRecord({ id: "after-rejection" }))
+      .finally(() => {
+        directCreateSettled = true;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(directCreateSettled).toBe(false);
+    releaseAudit();
+    await expect(transaction).rejects.toThrow("audit rejected");
+    await expect(directCreate).resolves.toMatchObject({
+      id: "after-rejection",
+    });
+  });
+});
+
 describe("createDrizzleCampaignRepository", () => {
   it("passes workspace identity and expected version to the executor", async () => {
     const calls: {

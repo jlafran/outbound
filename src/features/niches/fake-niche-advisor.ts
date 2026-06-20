@@ -2,6 +2,7 @@ import type { NormalizedOffer } from "@/features/offers/offer-schema";
 
 import type { NicheAdvisor } from "./niche-advisor";
 import {
+  calculateNicheScore,
   nicheRecommendationListSchema,
   type NicheRecommendation,
 } from "./niche-schema";
@@ -21,7 +22,6 @@ export class FakeNicheAdvisor implements NicheAdvisor {
       {
         id: "logistica-ar",
         name: "Logística",
-        score: 91,
         capacityToPay: 92,
         problemMagnitude: 94,
         urgency: 91,
@@ -33,7 +33,6 @@ export class FakeNicheAdvisor implements NicheAdvisor {
       {
         id: "software-b2b-ar",
         name: "Software B2B",
-        score: 87,
         capacityToPay: 90,
         problemMagnitude: 86,
         urgency: 85,
@@ -45,7 +44,6 @@ export class FakeNicheAdvisor implements NicheAdvisor {
       {
         id: "salud-privada-ar",
         name: "Salud privada",
-        score: 82,
         capacityToPay: 86,
         problemMagnitude: 88,
         urgency: 87,
@@ -54,7 +52,12 @@ export class FakeNicheAdvisor implements NicheAdvisor {
         estimatedCompanyCount: 780,
         reasoning: `${economicContext}; en salud privada argentina, mejorar procesos con presión de costos puede proteger capacidad operativa, aunque el acceso a decisores y la atribución del retorno son menos directos.`,
       },
-    ];
+    ]
+      .map((recommendation) => ({
+        ...recommendation,
+        score: calculateNicheScore(recommendation),
+      }))
+      .sort((left, right) => right.score - left.score);
 
     return structuredClone(
       nicheRecommendationListSchema.parse(recommendations),
