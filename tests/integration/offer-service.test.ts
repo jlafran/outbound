@@ -3,10 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { offers, workspaceMembers } from "@/db/schema";
 import { createMemoryAuditRepository } from "@/features/audit/audit-repository";
-import {
-  createMemoryOfferRepository,
-  type OfferRecord,
-} from "@/features/offers/offer-repository";
+import { createMemoryOfferRepository } from "@/features/offers/offer-repository";
 import { OfferService } from "@/features/offers/offer-service";
 import { validOfferInput } from "../fixtures/offer";
 
@@ -147,20 +144,3 @@ describe("offers schema", () => {
     ]);
   });
 });
-
-const jsonSafeRecord: OfferRecord = {
-  id: "offer-1",
-  workspaceId: "workspace-1",
-  createdBy: "user-1",
-  name: "Offer",
-  rawText: "A sufficiently descriptive raw offer document.",
-  problems: ["Problem"],
-  expectedResults: ["Result"],
-  ticketBand: "usd_5k_15k",
-  allowedPilot: "Pilot",
-  prohibitedClaims: ["Guarantee"],
-  version: 1,
-  createdAt: new Date("2026-06-19T00:00:00.000Z"),
-};
-
-void jsonSafeRecord;
