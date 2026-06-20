@@ -76,12 +76,26 @@ describe("scoreCompany", () => {
     });
 
     expect(result.total).toBe(20);
-    expect(result.components.capacityToPay.weightedContribution).toBe(5);
-    expect(result.components.problemMagnitude.weightedContribution).toBe(5);
-    expect(result.components.urgency.weightedContribution).toBe(3);
-    expect(result.components.solutionFit.weightedContribution).toBe(4);
-    expect(result.components.decisionMakerAccess.weightedContribution).toBe(1);
-    expect(result.components.evidenceConfidence.weightedContribution).toBe(2);
+    expect(result.components.capacityToPay.contribution).toBe(5);
+    expect(result.components.problemMagnitude.contribution).toBe(5);
+    expect(result.components.urgency.contribution).toBe(3);
+    expect(result.components.solutionFit.contribution).toBe(4);
+    expect(result.components.decisionMakerAccess.contribution).toBe(1);
+    expect(result.components.evidenceConfidence.contribution).toBe(2);
+  });
+
+  it("rounds the 1.005 edge case through a direct input contribution", () => {
+    const result = scoreCompany({
+      capacityToPay: 4.02,
+      problemMagnitude: 0,
+      urgency: 0,
+      solutionFit: 0,
+      decisionMakerAccess: 0,
+      evidenceConfidence: 0,
+    });
+
+    expect(result.total).toBe(1.01);
+    expect(result.components.capacityToPay.contribution).toBe(1.01);
   });
 
   it.each([
@@ -117,6 +131,9 @@ describe("scoreCompany", () => {
 
     expect(first).toEqual(second);
     expect(Object.isFrozen(scoreCompanyWeights)).toBe(true);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.components)).toBe(true);
+    expect(Object.isFrozen(first.components.capacityToPay)).toBe(true);
     expect(scoreCompanyWeights).toEqual({
       capacityToPay: 0.25,
       problemMagnitude: 0.25,
@@ -126,8 +143,11 @@ describe("scoreCompany", () => {
       evidenceConfidence: 0.1,
     });
 
-    first.components.capacityToPay.weightedContribution = 999;
-    input.capacityToPay = 0;
+    expect(() => {
+      (first.components.capacityToPay as { contribution: number }).contribution =
+        999;
+    }).toThrow();
+    (input as { capacityToPay: number }).capacityToPay = 0;
 
     expect(scoreCompany(buildInput())).toEqual(second);
   });
@@ -143,7 +163,7 @@ describe("scoreCompany", () => {
     });
 
     const sum = Object.values(result.components).reduce(
-      (total, component) => total + component.weightedContribution,
+      (total, component) => total + component.contribution,
       0,
     );
 

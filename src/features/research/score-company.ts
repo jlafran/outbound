@@ -18,26 +18,26 @@ export const scoreCompanyWeights = Object.freeze({
 
 export type ScoreCompanyWeights = typeof scoreCompanyWeights;
 export type ScoreCompanyField = keyof ScoreCompanyWeights;
-export type ScoreCompanyInput = Record<ScoreCompanyField, number>;
+export type ScoreCompanyInput = Readonly<Record<ScoreCompanyField, number>>;
 
-export type ScoreCompanyComponent = {
-  value: number;
+export type ScoreCompanyComponent = Readonly<{
+  input: number;
   weight: number;
-  weightedContribution: number;
-};
+  contribution: number;
+}>;
 
-export type ScoreCompanyResult = {
+export type ScoreCompanyResult = Readonly<{
   total: number;
-  components: Record<ScoreCompanyField, ScoreCompanyComponent>;
+  components: Readonly<Record<ScoreCompanyField, ScoreCompanyComponent>>;
   explanation: string;
-};
+}>;
 
 const fieldOrderMap = Object.fromEntries(
   fieldOrder.map((field, index) => [field, index]),
 ) as Record<ScoreCompanyField, number>;
 
 function roundToTwo(value: number): number {
-  return Number(value.toFixed(2));
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 function validateScoreValue(field: ScoreCompanyField, value: unknown): asserts value is number {
@@ -54,6 +54,10 @@ function formatValue(value: number): string {
   return Number.isInteger(value) ? `${value}` : value.toFixed(2);
 }
 
+function freezeComponent(component: ScoreCompanyComponent): ScoreCompanyComponent {
+  return Object.freeze(component);
+}
+
 function buildExplanation(
   total: number,
   components: ScoreCompanyResult["components"],
@@ -65,17 +69,17 @@ function buildExplanation(
     }))
     .sort(
       (left, right) =>
-        right.weightedContribution - left.weightedContribution ||
+        right.contribution - left.contribution ||
         fieldOrderMap[left.field] - fieldOrderMap[right.field],
     );
 
-  const factorParts = ordered.map(({ field, value, weight, weightedContribution }) => {
+  const factorParts = ordered.map(({ field, input, weight, contribution }) => {
     const uncertainty =
-      field === "evidenceConfidence" && value < 50
+      field === "evidenceConfidence" && input < 50
         ? ", uncertainty penalty"
         : "";
 
-    return `${field}=${formatValue(value)} (weight ${weight.toFixed(2)}, contribution ${weightedContribution.toFixed(
+    return `${field}=${formatValue(input)} (weight ${weight.toFixed(2)}, contribution ${contribution.toFixed(
       2,
     )}${uncertainty})`;
   });
@@ -92,17 +96,17 @@ export function scoreCompany(input: ScoreCompanyInput): ScoreCompanyResult {
 
   const components = Object.fromEntries(
     fieldOrder.map((field) => {
-      const value = input[field];
+      const inputValue = input[field];
       const weight = scoreCompanyWeights[field];
-      const weightedContribution = roundToTwo(value * weight);
+      const contribution = roundToTwo(inputValue * weight);
 
       return [
         field,
-        {
-          value,
+        freezeComponent({
+          input: inputValue,
           weight,
-          weightedContribution,
-        },
+          contribution,
+        }),
       ];
     }),
   ) as ScoreCompanyResult["components"];
@@ -114,9 +118,9 @@ export function scoreCompany(input: ScoreCompanyInput): ScoreCompanyResult {
 
   const total = Math.min(100, Math.max(0, roundToTwo(rawTotal)));
 
-  return {
+  return Object.freeze({
     total,
-    components,
+    components: Object.freeze(components),
     explanation: buildExplanation(total, components),
-  };
+  });
 }
