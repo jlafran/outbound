@@ -9,6 +9,7 @@ import {
   type CompanyInput,
   type CompanyRecord,
   normalizeCompanyDomain,
+  selectCanonicalCompanyName,
 } from "./company-schema";
 
 export interface CompanyRepository {
@@ -48,20 +49,17 @@ export function createDrizzleCompanyPersistenceExecutor(
 ): CompanyPersistenceExecutor {
   return {
     async upsert(record) {
+      const normalizedCurrentName = sql`normalize(btrim(${companies.name}), NFC)`;
       const betterName = sql`(
-        lower(${companies.name}) <> lower(excluded.name)
-        and (
-          array_length(regexp_split_to_array(trim(excluded.name), '\\s+'), 1)
-            > array_length(regexp_split_to_array(trim(${companies.name}), '\\s+'), 1)
-          or (
-            array_length(regexp_split_to_array(trim(excluded.name), '\\s+'), 1)
-              = array_length(regexp_split_to_array(trim(${companies.name}), '\\s+'), 1)
-            and length(excluded.name) >= length(${companies.name}) + 3
-          )
+        char_length(excluded.name) > char_length(${normalizedCurrentName})
+        or (
+          char_length(excluded.name) = char_length(${normalizedCurrentName})
+          and excluded.name collate "C" > ${normalizedCurrentName} collate "C"
         )
       )`;
+      const selectedName = sql`case when ${betterName} then excluded.name else ${normalizedCurrentName} end`;
       const betterDisplayDomain = sql`length(excluded.display_domain) > length(${companies.displayDomain})`;
-      const hasMeaningfulUpdate = sql`(${betterName} or ${betterDisplayDomain})`;
+      const hasMeaningfulUpdate = sql`(${selectedName} <> ${companies.name} or ${betterDisplayDomain})`;
       const [upserted] = await database
         .insert(companies)
         .values(record)
@@ -69,7 +67,7 @@ export function createDrizzleCompanyPersistenceExecutor(
           target: [companies.workspaceId, companies.normalizedDomain],
           set: {
             displayDomain: sql`case when ${betterDisplayDomain} then excluded.display_domain else ${companies.displayDomain} end`,
-            name: sql`case when ${betterName} then excluded.name else ${companies.name} end`,
+            name: selectedName,
             updatedAt: sql`case when ${hasMeaningfulUpdate} then excluded.updated_at else ${companies.updatedAt} end`,
             version: sql`case when ${hasMeaningfulUpdate} then ${companies.version} + 1 else ${companies.version} end`,
           },
@@ -180,22 +178,6 @@ export function createMemoryCompanyRepository(): CompanyRepository {
     return result;
   }
 
-  function isMeaningfullyBetterName(
-    current: string,
-    incoming: string,
-  ): boolean {
-    if (current.localeCompare(incoming, undefined, { sensitivity: "base" }) === 0) {
-      return false;
-    }
-
-    const currentWords = current.split(/\s+/).length;
-    const incomingWords = incoming.split(/\s+/).length;
-    return (
-      incomingWords > currentWords ||
-      (incomingWords === currentWords && incoming.length >= current.length + 3)
-    );
-  }
-
   return {
     async upsertByDomain(input) {
       return serializeUpsert(() => {
@@ -205,10 +187,15 @@ export function createMemoryCompanyRepository(): CompanyRepository {
         const existing = records.get(key);
 
         if (existing) {
-          if (isMeaningfullyBetterName(existing.name, parsed.name)) {
+          const canonicalName = selectCanonicalCompanyName(
+            existing.name,
+            parsed.name,
+          );
+
+          if (canonicalName !== existing.name) {
             const updated: CompanyRecord = {
               ...existing,
-              name: parsed.name,
+              name: canonicalName,
               updatedAt: new Date(),
               version: existing.version + 1,
             };

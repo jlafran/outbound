@@ -1,4 +1,7 @@
-import { getTableConfig } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
+import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,7 +11,10 @@ import {
   type CompanyDbExecutor,
   type CompanyPersistenceExecutor,
 } from "@/features/companies/company-repository";
-import { normalizeCompanyDomain } from "@/features/companies/company-schema";
+import {
+  normalizeCompanyDomain,
+  selectCanonicalCompanyName,
+} from "@/features/companies/company-schema";
 import {
   campaignCompanies,
   companies,
@@ -62,6 +68,50 @@ describe("createMemoryCompanyRepository", () => {
       updatedAt: first.updatedAt,
     });
   });
+
+  it.each([
+    ["Acme", "ACME", "Acme"],
+    ["Cafe", "Café", "Café"],
+    ["Cafe\u0301", "Café", "Café"],
+    ["Acme", "Acme Corporation", "Acme Corporation"],
+    ["Ácme", "Acme", "Ácme"],
+  ])(
+    "selects %s and %s commutatively as %s",
+    async (firstName, secondName, expected) => {
+      const forward = createMemoryCompanyRepository();
+      const reverse = createMemoryCompanyRepository();
+
+      await forward.upsertByDomain({
+        workspaceId: "workspace-1",
+        domain: "acme.com",
+        name: firstName,
+      });
+      const forwardResult = await forward.upsertByDomain({
+        workspaceId: "workspace-1",
+        domain: "acme.com",
+        name: secondName,
+      });
+      await reverse.upsertByDomain({
+        workspaceId: "workspace-1",
+        domain: "acme.com",
+        name: secondName,
+      });
+      const reverseResult = await reverse.upsertByDomain({
+        workspaceId: "workspace-1",
+        domain: "acme.com",
+        name: firstName,
+      });
+
+      expect(forwardResult.name).toBe(expected);
+      expect(reverseResult.name).toBe(expected);
+      expect(selectCanonicalCompanyName(firstName, secondName)).toBe(
+        expected,
+      );
+      expect(selectCanonicalCompanyName(secondName, firstName)).toBe(
+        expected,
+      );
+    },
+  );
 
   it("uses a more descriptive incoming name for an existing company", async () => {
     const repository = createMemoryCompanyRepository();
@@ -146,6 +196,43 @@ describe("createMemoryCompanyRepository", () => {
     expect(new Set(records.map((record) => record.id))).toHaveLength(1);
     expect(await repository.count("workspace-1")).toBe(1);
   });
+
+  it("converges on the same canonical name under opposite concurrent order", async () => {
+    const forward = createMemoryCompanyRepository();
+    const reverse = createMemoryCompanyRepository();
+
+    await Promise.all([
+      forward.upsertByDomain({
+        workspaceId: "workspace-1",
+        domain: "acme.com",
+        name: "Acme",
+      }),
+      forward.upsertByDomain({
+        workspaceId: "workspace-1",
+        domain: "acme.com",
+        name: "Ácme Corporation",
+      }),
+    ]);
+    await Promise.all([
+      reverse.upsertByDomain({
+        workspaceId: "workspace-1",
+        domain: "acme.com",
+        name: "Ácme Corporation",
+      }),
+      reverse.upsertByDomain({
+        workspaceId: "workspace-1",
+        domain: "acme.com",
+        name: "Acme",
+      }),
+    ]);
+
+    expect(
+      await forward.getByDomain("workspace-1", "acme.com"),
+    ).toMatchObject({ name: "Ácme Corporation" });
+    expect(
+      await reverse.getByDomain("workspace-1", "acme.com"),
+    ).toMatchObject({ name: "Ácme Corporation" });
+  });
 });
 
 describe("normalizeCompanyDomain", () => {
@@ -154,17 +241,17 @@ describe("normalizeCompanyDomain", () => {
     "EXAMPLE.COM.",
     "www.example.com",
     "https://www.Example.com:443/path?query=yes#hash",
-    "http://user:password@example.com:8080/path",
+    "example.com:443/path",
   ])("collapses %s to a canonical hostname", (input) => {
     expect(normalizeCompanyDomain(input)).toBe("example.com");
   });
 
   it("normalizes international domains through URL hostname parsing", () => {
-    expect(normalizeCompanyDomain("https://www.münich.example/path")).toBe(
-      "xn--mnich-kva.example",
+    expect(normalizeCompanyDomain("https://www.münich.com/path")).toBe(
+      "xn--mnich-kva.com",
     );
-    expect(normalizeCompanyDomain("xn--mnich-kva.example")).toBe(
-      "xn--mnich-kva.example",
+    expect(normalizeCompanyDomain("xn--mnich-kva.com")).toBe(
+      "xn--mnich-kva.com",
     );
   });
 
@@ -180,6 +267,18 @@ describe("normalizeCompanyDomain", () => {
     "https://bad_host.example",
     "https://-bad.example",
     "https://bad-.example",
+    "https://user@example.com",
+    "https://user:password@example.com",
+    "company.local",
+    "company.localhost",
+    "company.test",
+    "company.invalid",
+    "company.example",
+    "company.internal",
+    "company.lan",
+    "company.home",
+    "company.corp",
+    "company.onion",
   ])("rejects invalid company host %s", (input) => {
     expect(() => normalizeCompanyDomain(input)).toThrow();
   });
@@ -376,6 +475,15 @@ describe("company and research database schemas", () => {
       "campaign_id",
       "company_id",
     ]);
+    expect(
+      columnNames(
+        config.indexes.find(
+          (index) =>
+            index.config.name ===
+            "campaign_companies_workspace_company_id_unique",
+        )!.config.columns as { name: string }[],
+      ),
+    ).toEqual(["workspace_id", "company_id", "id"]);
     expect(campaignCompanies.status.enumValues).toEqual([
       "discovered",
       "researched",
@@ -405,6 +513,14 @@ describe("company and research database schemas", () => {
       "company_id",
       "url",
     ]);
+    expect(
+      columnNames(
+        config.indexes.find(
+          (index) =>
+            index.config.name === "sources_workspace_company_id_unique",
+        )!.config.columns as { name: string }[],
+      ),
+    ).toEqual(["workspace_id", "company_id", "id"]);
   });
 
   it("enforces evidence epistemology and tenant-safe optional links", () => {
@@ -412,11 +528,16 @@ describe("company and research database schemas", () => {
     const checkNames = config.checks.map((check) => check.name);
     const foreignColumnSets = config.foreignKeys.map((foreignKey) => {
       const reference = foreignKey.reference();
-      return columnNames(reference.columns);
+      return {
+        local: columnNames(reference.columns),
+        foreign: columnNames(reference.foreignColumns),
+      };
     });
 
     expect(evidence.kind.enumValues).toEqual(evidenceKindValues);
     expect(evidence.confidence.enumValues).toEqual(confidenceValues);
+    expect(evidence.campaignCompanyId.notNull).toBe(false);
+    expect(evidence.sourceId.notNull).toBe(false);
     expect(checkNames).toEqual(
       expect.arrayContaining([
         "evidence_assumptions_json_array_check",
@@ -426,9 +547,45 @@ describe("company and research database schemas", () => {
     );
     expect(foreignColumnSets).toEqual(
       expect.arrayContaining([
-        ["workspace_id", "company_id"],
-        ["workspace_id", "campaign_company_id"],
-        ["workspace_id", "source_id"],
+        {
+          local: ["workspace_id", "company_id"],
+          foreign: ["workspace_id", "id"],
+        },
+        {
+          local: [
+            "workspace_id",
+            "company_id",
+            "campaign_company_id",
+          ],
+          foreign: ["workspace_id", "company_id", "id"],
+        },
+        {
+          local: ["workspace_id", "company_id", "source_id"],
+          foreign: ["workspace_id", "company_id", "id"],
+        },
+      ]),
+    );
+    expect(
+      config.indexes.map((index) => ({
+        name: index.config.name,
+        columns: columnNames(
+          index.config.columns as { name: string }[],
+        ),
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          name: "evidence_workspace_company_idx",
+          columns: ["workspace_id", "company_id"],
+        },
+        {
+          name: "evidence_workspace_source_idx",
+          columns: ["workspace_id", "source_id"],
+        },
+        {
+          name: "evidence_workspace_campaign_company_idx",
+          columns: ["workspace_id", "campaign_company_id"],
+        },
       ]),
     );
   });
@@ -440,24 +597,61 @@ describe("company and research database schemas", () => {
         index.config.name ===
         "offer_opportunities_company_offer_unique",
     );
-    const foreignColumnSets = config.foreignKeys.map((foreignKey) =>
-      columnNames(foreignKey.reference().columns),
-    );
+    const foreignColumnSets = config.foreignKeys.map((foreignKey) => {
+      const reference = foreignKey.reference();
+      return {
+        local: columnNames(reference.columns),
+        foreign: columnNames(reference.foreignColumns),
+      };
+    });
 
     expect(offerOpportunities.status.enumValues).toEqual([
       "candidate",
       "fit",
       "not_fit",
     ]);
+    expect(offerOpportunities.campaignCompanyId.notNull).toBe(false);
     expect(columnNames(unique!.config.columns as { name: string }[])).toEqual([
       "company_id",
       "offer_id",
     ]);
     expect(foreignColumnSets).toEqual(
       expect.arrayContaining([
-        ["workspace_id", "company_id"],
-        ["workspace_id", "offer_id"],
-        ["workspace_id", "campaign_company_id"],
+        {
+          local: ["workspace_id", "company_id"],
+          foreign: ["workspace_id", "id"],
+        },
+        {
+          local: ["workspace_id", "offer_id"],
+          foreign: ["workspace_id", "id"],
+        },
+        {
+          local: [
+            "workspace_id",
+            "company_id",
+            "campaign_company_id",
+          ],
+          foreign: ["workspace_id", "company_id", "id"],
+        },
+      ]),
+    );
+    expect(
+      config.indexes.map((index) => ({
+        name: index.config.name,
+        columns: columnNames(
+          index.config.columns as { name: string }[],
+        ),
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          name: "offer_opportunities_workspace_offer_idx",
+          columns: ["workspace_id", "offer_id"],
+        },
+        {
+          name: "offer_opportunities_workspace_campaign_company_idx",
+          columns: ["workspace_id", "campaign_company_id"],
+        },
       ]),
     );
   });
@@ -467,6 +661,7 @@ describe("Drizzle company persistence", () => {
   it("uses an atomic domain conflict upsert and returns its row", async () => {
     let conflictTarget: string[] = [];
     let updatedFields: string[] = [];
+    let nameUpdateExpression: unknown;
     const returnedRow = {
       id: "company-1",
       workspaceId: "workspace-1",
@@ -488,6 +683,7 @@ describe("Drizzle company persistence", () => {
               }) {
                 conflictTarget = config.target.map((column) => column.name);
                 updatedFields = Object.keys(config.set);
+                nameUpdateExpression = config.set.name;
                 return {
                   returning: () => Promise.resolve([returnedRow]),
                 };
@@ -511,6 +707,14 @@ describe("Drizzle company persistence", () => {
         "version",
       ]),
     );
+    const nameUpdateSql = new PgDialect()
+      .sqlToQuery(nameUpdateExpression as SQL)
+      .sql.toLowerCase();
+    expect(nameUpdateSql).toContain("normalize(btrim(");
+    expect(nameUpdateSql).toContain("char_length(");
+    expect(nameUpdateSql).toContain('collate "c" >');
+    expect(nameUpdateSql).not.toContain("lower(");
+    expect(nameUpdateSql).not.toContain("locale");
     expect(row).toBe(returnedRow);
   });
 
@@ -582,5 +786,51 @@ describe("Drizzle company persistence", () => {
         name: "Example",
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe("company knowledge base migration", () => {
+  it("creates composite targets before company-consistent foreign keys", () => {
+    const migration = readFileSync(
+      resolve("drizzle/0008_friendly_betty_brant.sql"),
+      "utf8",
+    );
+    const campaignTarget =
+      'CREATE UNIQUE INDEX "campaign_companies_workspace_company_id_unique"';
+    const sourceTarget =
+      'CREATE UNIQUE INDEX "sources_workspace_company_id_unique"';
+    const evidenceCampaignForeignKey =
+      'FOREIGN KEY ("workspace_id","company_id","campaign_company_id") REFERENCES "public"."campaign_companies"("workspace_id","company_id","id")';
+    const evidenceSourceForeignKey =
+      'FOREIGN KEY ("workspace_id","company_id","source_id") REFERENCES "public"."sources"("workspace_id","company_id","id")';
+
+    expect(migration.indexOf(campaignTarget)).toBeGreaterThanOrEqual(0);
+    expect(migration.indexOf(sourceTarget)).toBeGreaterThanOrEqual(0);
+    expect(migration.indexOf(campaignTarget)).toBeLessThan(
+      migration.indexOf(evidenceCampaignForeignKey),
+    );
+    expect(migration.indexOf(sourceTarget)).toBeLessThan(
+      migration.indexOf(evidenceSourceForeignKey),
+    );
+    expect(
+      migration.match(
+        /FOREIGN KEY \("workspace_id","company_id","campaign_company_id"\)/g,
+      ),
+    ).toHaveLength(2);
+    expect(migration).toContain(
+      'CREATE INDEX "evidence_workspace_company_idx"',
+    );
+    expect(migration).toContain(
+      'CREATE INDEX "evidence_workspace_source_idx"',
+    );
+    expect(migration).toContain(
+      'CREATE INDEX "evidence_workspace_campaign_company_idx"',
+    );
+    expect(migration).toContain(
+      'CREATE INDEX "offer_opportunities_workspace_offer_idx"',
+    );
+    expect(migration).toContain(
+      'CREATE INDEX "offer_opportunities_workspace_campaign_company_idx"',
+    );
   });
 });

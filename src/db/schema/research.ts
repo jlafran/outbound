@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   check,
   foreignKey,
+  index,
   jsonb,
   pgEnum,
   pgTable,
@@ -79,6 +80,11 @@ export const campaignCompanies = pgTable(
       table.workspaceId,
       table.id,
     ),
+    uniqueIndex("campaign_companies_workspace_company_id_unique").on(
+      table.workspaceId,
+      table.companyId,
+      table.id,
+    ),
   ],
 );
 
@@ -109,6 +115,11 @@ export const sources = pgTable(
       table.workspaceId,
       table.id,
     ),
+    uniqueIndex("sources_workspace_company_id_unique").on(
+      table.workspaceId,
+      table.companyId,
+      table.id,
+    ),
   ],
 );
 
@@ -137,17 +148,38 @@ export const evidence = pgTable(
     }),
     foreignKey({
       name: "evidence_workspace_campaign_company_fk",
-      columns: [table.workspaceId, table.campaignCompanyId],
+      columns: [
+        table.workspaceId,
+        table.companyId,
+        table.campaignCompanyId,
+      ],
       foreignColumns: [
         campaignCompanies.workspaceId,
+        campaignCompanies.companyId,
         campaignCompanies.id,
       ],
     }),
     foreignKey({
       name: "evidence_workspace_source_fk",
-      columns: [table.workspaceId, table.sourceId],
-      foreignColumns: [sources.workspaceId, sources.id],
+      columns: [table.workspaceId, table.companyId, table.sourceId],
+      foreignColumns: [
+        sources.workspaceId,
+        sources.companyId,
+        sources.id,
+      ],
     }),
+    index("evidence_workspace_company_idx").on(
+      table.workspaceId,
+      table.companyId,
+    ),
+    index("evidence_workspace_source_idx").on(
+      table.workspaceId,
+      table.sourceId,
+    ),
+    index("evidence_workspace_campaign_company_idx").on(
+      table.workspaceId,
+      table.campaignCompanyId,
+    ),
     check(
       "evidence_assumptions_json_array_check",
       sql`jsonb_typeof(${table.assumptions}) = 'array'`,
@@ -192,15 +224,28 @@ export const offerOpportunities = pgTable(
     }),
     foreignKey({
       name: "offer_opportunities_workspace_campaign_company_fk",
-      columns: [table.workspaceId, table.campaignCompanyId],
+      columns: [
+        table.workspaceId,
+        table.companyId,
+        table.campaignCompanyId,
+      ],
       foreignColumns: [
         campaignCompanies.workspaceId,
+        campaignCompanies.companyId,
         campaignCompanies.id,
       ],
     }),
     uniqueIndex("offer_opportunities_company_offer_unique").on(
       table.companyId,
       table.offerId,
+    ),
+    index("offer_opportunities_workspace_offer_idx").on(
+      table.workspaceId,
+      table.offerId,
+    ),
+    index("offer_opportunities_workspace_campaign_company_idx").on(
+      table.workspaceId,
+      table.campaignCompanyId,
     ),
   ],
 );
