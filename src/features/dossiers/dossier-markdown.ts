@@ -1,27 +1,15 @@
 import type { AuditRepository } from "@/features/audit/audit-repository";
 
 import {
-  dossierSchema,
+  buildDossierExportView,
+  EMPTY_DOSSIER_SECTION,
+  type DossierExportItem,
+  type DossierExportView,
+} from "./dossier-export-view";
+import {
   type Dossier,
-  type DossierItem,
 } from "./dossier-schema";
 import type { DossierRepository } from "./dossier-repository";
-
-const EMPTY_SECTION = "Sin información registrada.";
-
-const epistemicLabels: Record<DossierItem["kind"], string> = {
-  confirmed_by_prospect: "Confirmado por el prospecto",
-  researched_fact: "Hecho investigado",
-  hypothesis: "Hipótesis",
-  estimate: "Estimación",
-  recommendation: "Recomendación",
-};
-
-const confidenceLabels: Record<DossierItem["confidence"], string> = {
-  low: "baja",
-  medium: "media",
-  high: "alta",
-};
 
 export function escapeMarkdownText(value: string): string {
   return value
@@ -40,10 +28,10 @@ export function escapeMarkdownText(value: string): string {
 }
 
 function renderText(value: string): string {
-  return value ? escapeMarkdownText(value) : EMPTY_SECTION;
+  return value ? escapeMarkdownText(value) : EMPTY_DOSSIER_SECTION;
 }
 
-function renderCompany(dossier: Dossier): string {
+function renderCompany(dossier: DossierExportView): string {
   const lines = [
     dossier.companyOverview
       ? `Empresa: ${escapeMarkdownText(dossier.companyOverview)}`
@@ -53,12 +41,14 @@ function renderCompany(dossier: Dossier): string {
       : null,
   ].filter((line): line is string => line !== null);
 
-  return lines.length > 0 ? lines.join("\n\n") : EMPTY_SECTION;
+  return lines.length > 0
+    ? lines.join("\n\n")
+    : EMPTY_DOSSIER_SECTION;
 }
 
-function renderContacts(dossier: Dossier): string {
+function renderContacts(dossier: DossierExportView): string {
   if (dossier.contacts.length === 0) {
-    return EMPTY_SECTION;
+    return EMPTY_DOSSIER_SECTION;
   }
 
   return dossier.contacts
@@ -78,11 +68,11 @@ function renderContacts(dossier: Dossier): string {
     .join("\n");
 }
 
-function renderItem(item: DossierItem): string {
+function renderItem(item: DossierExportItem): string {
   return [
     `- Declaración: ${escapeMarkdownText(item.statement)}`,
-    `  - Etiqueta epistémica: ${epistemicLabels[item.kind]}`,
-    `  - Confianza: ${confidenceLabels[item.confidence]}`,
+    `  - Etiqueta epistémica: ${item.epistemicLabel}`,
+    `  - Confianza: ${item.confidenceLabel}`,
     ...(item.sourceUrl
       ? [`  - Fuente: ${escapeMarkdownText(item.sourceUrl)}`]
       : []),
@@ -97,14 +87,13 @@ function renderItem(item: DossierItem): string {
   ].join("\n");
 }
 
-function renderItems(items: DossierItem[]): string {
-  const visibleItems = items.filter((item) => !item.hidden);
-  return visibleItems.length > 0
-    ? visibleItems.map(renderItem).join("\n\n")
-    : EMPTY_SECTION;
+function renderItems(items: DossierExportItem[]): string {
+  return items.length > 0
+    ? items.map(renderItem).join("\n\n")
+    : EMPTY_DOSSIER_SECTION;
 }
 
-function renderPendingQuestions(dossier: Dossier): string {
+function renderPendingQuestions(dossier: DossierExportView): string {
   return dossier.pendingQuestions.length > 0
     ? dossier.pendingQuestions
         .map(
@@ -112,83 +101,89 @@ function renderPendingQuestions(dossier: Dossier): string {
             `${index + 1}. ${escapeMarkdownText(question)}`,
         )
         .join("\n")
-    : EMPTY_SECTION;
+    : EMPTY_DOSSIER_SECTION;
 }
 
 export function renderDossierMarkdown(dossier: Dossier): string {
-  const parsed = dossierSchema.parse(dossier);
+  const view = buildDossierExportView(dossier);
+  const sections = Object.fromEntries(
+    view.sections.map((section) => [section.key, section]),
+  ) as Record<
+    DossierExportView["sections"][number]["key"],
+    DossierExportView["sections"][number]
+  >;
 
   const lines = [
     "# Dossier previo a la reunión",
     "",
-    `- Versión: ${parsed.version}`,
-    `- Fecha: ${parsed.createdAt.toISOString()}`,
+    `- Versión: ${view.version}`,
+    `- Fecha: ${view.createdAt}`,
     `- ID campaña-empresa: ${escapeMarkdownText(
-      parsed.campaignCompanyId,
+      view.campaignCompanyId,
     )}`,
-    ...(parsed.meetingId
-      ? [`- ID reunión: ${escapeMarkdownText(parsed.meetingId)}`]
+    ...(view.meetingId
+      ? [`- ID reunión: ${escapeMarkdownText(view.meetingId)}`]
       : []),
     "",
     "## Resumen ejecutivo",
     "",
-    renderText(parsed.executiveSummary),
+    renderText(view.executiveSummary),
     "",
     "## Empresa y modelo de negocio",
     "",
-    renderCompany(parsed),
+    renderCompany(view),
     "",
     "## Contactos",
     "",
-    renderContacts(parsed),
+    renderContacts(view),
     "",
     "## Historial / resumen de conversación",
     "",
-    renderText(parsed.conversationSummary),
+    renderText(view.conversationSummary),
     "",
     "## Necesidades confirmadas",
     "",
-    renderItems(parsed.confirmedNeeds),
+    renderItems(sections.confirmedNeeds.items),
     "",
     "## Hechos investigados",
     "",
-    renderItems(parsed.researchedFacts),
+    renderItems(sections.researchedFacts.items),
     "",
     "## Hipótesis a validar",
     "",
-    renderItems(parsed.hypotheses),
+    renderItems(sections.hypotheses.items),
     "",
     "## Estimaciones",
     "",
-    renderItems(parsed.estimates),
+    renderItems(sections.estimates.items),
     "",
     "## Competidores y brechas",
     "",
-    renderItems(parsed.competitors),
+    renderItems(sections.competitors.items),
     "",
     "## Recomendaciones",
     "",
-    renderItems(parsed.recommendations),
+    renderItems(sections.recommendations.items),
     "",
     "## Preguntas pendientes",
     "",
-    renderPendingQuestions(parsed),
+    renderPendingQuestions(view),
   ];
 
   return `${lines.join("\n")}\n`;
 }
 
-type RequestContext = {
+export type DossierRequestContext = {
   workspaceId: string;
   actorId: string;
 };
 
-type RouteParams = {
+type DossierRouteParams = {
   id?: unknown;
 };
 
-type MarkdownRouteContext = {
-  params: RouteParams | Promise<RouteParams>;
+export type DossierRouteContext = {
+  params: DossierRouteParams | Promise<DossierRouteParams>;
 };
 
 type MarkdownDossierHandlerDependencies = {
@@ -196,14 +191,14 @@ type MarkdownDossierHandlerDependencies = {
   auditRepository: AuditRepository;
   resolveRequestContext(
     request: Request,
-  ): Promise<RequestContext | null>;
+  ): Promise<DossierRequestContext | null>;
 };
 
-function errorResponse(status: number): Response {
+export function dossierExportErrorResponse(status: number): Response {
   return new Response("No se pudo exportar el dossier.", { status });
 }
 
-function parseDossierId(value: unknown): string | null {
+export function parseDossierId(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -216,7 +211,9 @@ function parseDossierId(value: unknown): string | null {
     : null;
 }
 
-function campaignCompanySlug(campaignCompanyId: string): string {
+export function campaignCompanySlug(
+  campaignCompanyId: string,
+): string {
   const slug = campaignCompanyId
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -236,16 +233,16 @@ export function createMarkdownDossierHandler({
 }: MarkdownDossierHandlerDependencies) {
   return async function markdownDossierHandler(
     request: Request,
-    { params }: MarkdownRouteContext,
+    { params }: DossierRouteContext,
   ): Promise<Response> {
     const requestContext = await resolveRequestContext(request);
     if (!requestContext) {
-      return errorResponse(401);
+      return dossierExportErrorResponse(401);
     }
 
     const dossierId = parseDossierId((await params).id);
     if (!dossierId) {
-      return errorResponse(400);
+      return dossierExportErrorResponse(400);
     }
 
     const dossier = await dossierRepository.getById(
@@ -253,7 +250,7 @@ export function createMarkdownDossierHandler({
       dossierId,
     );
     if (!dossier) {
-      return errorResponse(404);
+      return dossierExportErrorResponse(404);
     }
 
     try {
@@ -284,7 +281,7 @@ export function createMarkdownDossierHandler({
         },
       });
     } catch {
-      return errorResponse(500);
+      return dossierExportErrorResponse(500);
     }
   };
 }

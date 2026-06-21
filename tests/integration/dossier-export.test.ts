@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+
+import { chromium } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -16,6 +20,12 @@ import {
   dossierSchema,
   type Dossier,
 } from "@/features/dossiers/dossier-schema";
+import { buildDossierExportView } from "@/features/dossiers/dossier-export-view";
+import {
+  createPdfDossierHandler,
+  renderDossierHtml,
+  renderDossierPdf,
+} from "@/features/dossiers/dossier-pdf";
 
 function createDossier(overrides: Partial<Dossier> = {}): Dossier {
   return dossierSchema.parse({
@@ -386,6 +396,278 @@ describe("renderDossierMarkdown", () => {
   });
 });
 
+describe("renderDossierHtml", () => {
+  it("renders a complete Spanish document with dossier metadata", () => {
+    const html = renderDossierHtml(createDossier());
+
+    expect(html).toContain("<!doctype html>");
+    expect(html).toContain('<html lang="es">');
+    expect(html).toContain("<meta charset=\"utf-8\">");
+    expect(html).toContain("Dossier previo a la reunión");
+    expect(html).toContain("Versión 3");
+  });
+
+  it("escapes all untrusted HTML and includes no external resources", () => {
+    const html = renderDossierHtml(
+      createDossier({
+        campaignCompanyId: `campaign-company-"'><script>bad()</script>`,
+        executiveSummary:
+          `<img src=x onerror="bad()"><script>bad()</script>&"'`,
+        contacts: [
+          {
+            name: `<svg onload="bad()">`,
+            role: `CEO & "admin"`,
+            corporateEmail: "safe@example.com",
+          },
+        ],
+        researchedFacts: [
+          {
+            id: "fact-1",
+            kind: "researched_fact",
+            statement: `<a href="javascript:bad()">malicioso</a>`,
+            sourceUrl:
+              "https://example.com/path?quote=%22&next=%3Cbad%3E",
+            confidence: "high",
+            assumptions: [`<style>body{display:none}</style>`],
+            hidden: false,
+          },
+        ],
+      }),
+    );
+
+    expect(html).not.toContain("<script>");
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<svg");
+    expect(html).not.toContain("<style>body");
+    expect(html).not.toContain('href="javascript:');
+    expect(html).toContain("&lt;script&gt;bad()&lt;/script&gt;");
+    expect(html).toContain("&amp;");
+    expect(html).toContain("&quot;");
+    expect(html).toContain("&#39;");
+    expect(html).toContain(
+      'href="https://example.com/path?quote=%22&amp;next=%3Cbad%3E"',
+    );
+    expect(html).not.toMatch(/<(?:script|link|img|iframe)\b/i);
+  });
+
+  it("uses the shared semantic view, omits hidden items, and preserves order", () => {
+    const dossier = createDossier({
+      confirmedNeeds: [
+        {
+          id: "need-1",
+          kind: "confirmed_by_prospect",
+          statement: "Primera necesidad",
+          confidence: "high",
+          assumptions: [],
+          hidden: false,
+        },
+      ],
+      hypotheses: [
+        {
+          id: "hidden-1",
+          kind: "hypothesis",
+          statement: "CONTENIDO OCULTO",
+          confidence: "low",
+          assumptions: ["SUPUESTO OCULTO"],
+          hidden: true,
+        },
+      ],
+      recommendations: [
+        {
+          id: "recommendation-1",
+          kind: "recommendation",
+          statement: "Primera recomendación",
+          confidence: "medium",
+          assumptions: [],
+          hidden: false,
+        },
+        {
+          id: "recommendation-2",
+          kind: "recommendation",
+          statement: "Segunda recomendación",
+          confidence: "low",
+          assumptions: [],
+          hidden: false,
+        },
+      ],
+    });
+
+    const view = buildDossierExportView(dossier);
+    const html = renderDossierHtml(dossier);
+
+    expect(view.version).toBe(3);
+    expect(view.createdAt).toBe("2026-06-21T12:34:56.000Z");
+    expect(view.sections.map((section) => section.title)).toEqual([
+      "Necesidades confirmadas",
+      "Hechos investigados",
+      "Hipótesis a validar",
+      "Estimaciones",
+      "Competidores y brechas",
+      "Recomendaciones",
+    ]);
+    expect(view.sections[2]?.items).toEqual([]);
+    expect(html).not.toContain("CONTENIDO OCULTO");
+    expect(html).not.toContain("SUPUESTO OCULTO");
+    expect(html).toContain("Confirmado por el prospecto");
+    expect(html).toContain("Recomendación");
+    expect(html).toContain("Confianza: alta");
+    expect(html).toContain("Confianza: media");
+    expect(html).toContain("Confianza: baja");
+    expect(html).toContain("Sin información registrada.");
+    expect(html.indexOf("Primera recomendación")).toBeLessThan(
+      html.indexOf("Segunda recomendación"),
+    );
+    expect(renderDossierMarkdown(dossier)).toContain(
+      `- Versión: ${view.version}`,
+    );
+  });
+});
+
+type FakePdfPage = {
+  setContent: ReturnType<typeof vi.fn>;
+  pdf: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+};
+
+function createBrowserFactory(options: {
+  setContentError?: Error;
+  pdfError?: Error;
+} = {}) {
+  const page: FakePdfPage = {
+    setContent: options.setContentError
+      ? vi.fn().mockRejectedValue(options.setContentError)
+      : vi.fn().mockResolvedValue(undefined),
+    pdf: options.pdfError
+      ? vi.fn().mockRejectedValue(options.pdfError)
+      : vi.fn().mockResolvedValue(Buffer.from("%PDF-mocked")),
+    close: vi.fn().mockResolvedValue(undefined),
+  };
+  const browser = {
+    newPage: vi.fn().mockResolvedValue(page),
+    close: vi.fn().mockResolvedValue(undefined),
+  };
+  const factory = {
+    launch: vi.fn().mockResolvedValue(browser),
+  };
+
+  return { factory, browser, page };
+}
+
+describe("renderDossierPdf", () => {
+  it("propagates arbitrary browser launch errors", async () => {
+    const factory = {
+      launch: vi
+        .fn()
+        .mockRejectedValue(new Error("unexpected launch failure")),
+    };
+
+    await expect(
+      renderDossierPdf(createDossier(), factory),
+    ).rejects.toThrow("unexpected launch failure");
+  });
+
+  it("uses exact Chromium and A4 PDF options and returns a Buffer", async () => {
+    const { factory, browser, page } = createBrowserFactory();
+
+    const result = await renderDossierPdf(createDossier(), factory);
+
+    expect(factory.launch).toHaveBeenCalledWith({ headless: true });
+    expect(browser.newPage).toHaveBeenCalledOnce();
+    expect(page.setContent).toHaveBeenCalledWith(
+      expect.stringContaining("<!doctype html>"),
+      { waitUntil: "load" },
+    );
+    expect(page.pdf).toHaveBeenCalledWith({
+      format: "A4",
+      printBackground: true,
+      margin: {
+        top: "16mm",
+        right: "14mm",
+        bottom: "16mm",
+        left: "14mm",
+      },
+    });
+    expect(Buffer.isBuffer(result)).toBe(true);
+    expect(page.close).toHaveBeenCalledOnce();
+    expect(browser.close).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["setContent", { setContentError: new Error("content failed") }],
+    ["pdf", { pdfError: new Error("pdf failed") }],
+  ])("closes the page and browser when %s fails", async (_, options) => {
+    const { factory, browser, page } = createBrowserFactory(options);
+
+    await expect(
+      renderDossierPdf(createDossier(), factory),
+    ).rejects.toThrow();
+
+    expect(page.close).toHaveBeenCalledOnce();
+    expect(browser.close).toHaveBeenCalledOnce();
+  });
+
+  it("closes the page before closing the browser", async () => {
+    let pageClosed = false;
+    const page = {
+      setContent: vi.fn().mockResolvedValue(undefined),
+      pdf: vi.fn().mockResolvedValue(Buffer.from("%PDF-mocked")),
+      close: vi.fn().mockImplementation(async () => {
+        await Promise.resolve();
+        pageClosed = true;
+      }),
+    };
+    const browser = {
+      newPage: vi.fn().mockResolvedValue(page),
+      close: vi.fn().mockImplementation(async () => {
+        if (!pageClosed) {
+          throw new Error("browser closed before page");
+        }
+      }),
+    };
+    const factory = {
+      launch: vi.fn().mockResolvedValue(browser),
+    };
+
+    await expect(
+      renderDossierPdf(createDossier(), factory),
+    ).resolves.toBeInstanceOf(Buffer);
+  });
+});
+
+describe("renderDossierPdf real Chromium smoke", () => {
+  function isKnownMacOsSandboxLaunchFailure(error: unknown): boolean {
+    return (
+      error instanceof Error &&
+      error.message.includes("browserType.launch:") &&
+      error.message.includes("MachPortRendezvousServer") &&
+      error.message.includes("Permission denied")
+    );
+  }
+
+  it.skipIf(!existsSync(chromium.executablePath()))(
+    "renders a real PDF when local Chromium is installed",
+    async ({ skip }) => {
+      let pdf: Buffer;
+      try {
+        pdf = await renderDossierPdf(createDossier());
+      } catch (error) {
+        if (isKnownMacOsSandboxLaunchFailure(error)) {
+          skip();
+          return;
+        }
+        throw error;
+      }
+
+      expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+      expect(pdf.byteLength).toBeGreaterThan(1000);
+
+      if (process.env.DOSSIER_PDF_SMOKE_OUTPUT) {
+        await writeFile(process.env.DOSSIER_PDF_SMOKE_OUTPUT, pdf);
+      }
+    },
+  );
+});
+
 function createRouteHandler(options: {
   dossier?: Dossier;
   workspaceId?: string;
@@ -613,6 +895,175 @@ describe("createMarkdownDossierHandler", () => {
   });
 });
 
+function createPdfRouteHandler(options: {
+  dossier?: Dossier;
+  workspaceId?: string;
+  actorId?: string;
+  auditRepository?: AuditRepository;
+  dossierRepository?: DossierRepository;
+  renderPdf?: (dossier: Dossier) => Promise<Buffer>;
+}) {
+  const dossier = options.dossier ?? createDossier();
+  const dossierRepository =
+    options.dossierRepository ??
+    createMemoryDossierRepository(
+      new Map([[dossier.id, structuredClone(dossier)]]),
+    );
+  const auditRepository =
+    options.auditRepository ?? createMemoryAuditRepository();
+  const renderPdf =
+    options.renderPdf ??
+    vi.fn().mockResolvedValue(Buffer.from("%PDF-route-body"));
+
+  return {
+    auditRepository,
+    renderPdf,
+    handler: createPdfDossierHandler({
+      dossierRepository,
+      auditRepository,
+      renderPdf,
+      async resolveRequestContext() {
+        return options.workspaceId === undefined
+          ? null
+          : {
+              workspaceId: options.workspaceId,
+              actorId: options.actorId ?? "user-1",
+            };
+      },
+    }),
+  };
+}
+
+function createPdfRequest() {
+  return new Request("http://localhost/api/dossiers/dossier-1/pdf");
+}
+
+describe("createPdfDossierHandler", () => {
+  it.each([
+    ["unauthorized", undefined, { id: "dossier-1" }, 401],
+    ["invalid id", "workspace-1", { id: " \r\n " }, 400],
+    ["wrong workspace", "workspace-2", { id: "dossier-1" }, 404],
+  ])(
+    "returns the expected status for %s",
+    async (_, workspaceId, params, expectedStatus) => {
+      const { handler, renderPdf } = createPdfRouteHandler({
+        workspaceId,
+      });
+
+      const response = await handler(createPdfRequest(), {
+        params: Promise.resolve(params),
+      });
+
+      expect(response.status).toBe(expectedStatus);
+      expect(renderPdf).not.toHaveBeenCalled();
+    },
+  );
+
+  it("returns exact PDF headers/body and appends the export audit", async () => {
+    const dossier = createDossier();
+    const pdf = Buffer.from("%PDF-exact-route-body");
+    const renderPdf = vi.fn().mockResolvedValue(pdf);
+    const { handler, auditRepository } = createPdfRouteHandler({
+      dossier,
+      workspaceId: "workspace-1",
+      actorId: "actor-9",
+      renderPdf,
+    });
+
+    const response = await handler(createPdfRequest(), {
+      params: { id: dossier.id },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("application/pdf");
+    expect(response.headers.get("Content-Disposition")).toBe(
+      'attachment; filename="dossier-campaign-company-1-v3.pdf"',
+    );
+    expect(response.headers.get("Content-Length")).toBe(
+      String(pdf.byteLength),
+    );
+    expect(
+      Buffer.from(await response.arrayBuffer()).equals(pdf),
+    ).toBe(true);
+    expect(renderPdf).toHaveBeenCalledWith(dossier);
+    expect(await auditRepository.list("workspace-1")).toEqual([
+      {
+        workspaceId: "workspace-1",
+        actorId: "actor-9",
+        action: "dossier.exported",
+        entityId: "dossier-1",
+        metadata: {
+          format: "pdf",
+          dossierId: "dossier-1",
+          campaignCompanyId: "campaign-company-1",
+          version: 3,
+        },
+      },
+    ]);
+  });
+
+  it("sanitizes the PDF attachment filename", async () => {
+    const dossier = createDossier({
+      campaignCompanyId:
+        "../../ÁCME Corp\r\nX-Injected: yes/" + "A".repeat(100),
+    });
+    const { handler } = createPdfRouteHandler({
+      dossier,
+      workspaceId: "workspace-1",
+    });
+
+    const response = await handler(createPdfRequest(), {
+      params: Promise.resolve({ id: dossier.id }),
+    });
+    const disposition = response.headers.get("Content-Disposition");
+
+    expect(disposition).toMatch(
+      /^attachment; filename="dossier-[a-z0-9-]+-v3\.pdf"$/,
+    );
+    expect(disposition).not.toMatch(/[\r\n/\\:]/);
+    expect(disposition?.length).toBeLessThanOrEqual(111);
+  });
+
+  it.each(["render", "audit"])(
+    "returns 500 without a PDF document when %s fails",
+    async (failure) => {
+      const auditRepository: AuditRepository =
+        failure === "audit"
+          ? {
+              async append() {
+                throw new Error("sensitive audit failure");
+              },
+              async list() {
+                return [];
+              },
+            }
+          : createMemoryAuditRepository();
+      const renderPdf =
+        failure === "render"
+          ? vi.fn().mockRejectedValue(new Error("sensitive PDF failure"))
+          : vi.fn().mockResolvedValue(Buffer.from("%PDF-secret"));
+      const { handler } = createPdfRouteHandler({
+        workspaceId: "workspace-1",
+        auditRepository,
+        renderPdf,
+      });
+
+      const response = await handler(createPdfRequest(), {
+        params: Promise.resolve({ id: "dossier-1" }),
+      });
+      const body = await response.text();
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get("Content-Type")).not.toBe(
+        "application/pdf",
+      );
+      expect(body).not.toContain("%PDF");
+      expect(body).not.toContain("sensitive");
+      expect(await auditRepository.list("workspace-1")).toEqual([]);
+    },
+  );
+});
+
 describe("Markdown dossier production route", () => {
   const originalEnvironment = {
     DATABASE_URL: process.env.DATABASE_URL,
@@ -639,6 +1090,38 @@ describe("Markdown dossier production route", () => {
 
     await expect(
       import("@/app/api/dossiers/[id]/markdown/route"),
+    ).resolves.toMatchObject({
+      GET: expect.any(Function),
+    });
+  });
+});
+
+describe("PDF dossier production route", () => {
+  const originalEnvironment = {
+    DATABASE_URL: process.env.DATABASE_URL,
+    AUTH_SECRET: process.env.AUTH_SECRET,
+    ALLOWED_EMAILS: process.env.ALLOWED_EMAILS,
+  };
+
+  afterEach(() => {
+    for (const [name, value] of Object.entries(originalEnvironment)) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+    vi.resetModules();
+  });
+
+  it("loads without evaluating runtime secrets or database configuration", async () => {
+    delete process.env.DATABASE_URL;
+    delete process.env.AUTH_SECRET;
+    delete process.env.ALLOWED_EMAILS;
+    vi.resetModules();
+
+    await expect(
+      import("@/app/api/dossiers/[id]/pdf/route"),
     ).resolves.toMatchObject({
       GET: expect.any(Function),
     });
