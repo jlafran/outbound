@@ -4,6 +4,8 @@ import { writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// @ts-expect-error The portable Node launcher is intentionally plain ESM.
+import { isPdfSmokeRequired } from "../../scripts/run-pdf-smoke.mjs";
 import {
   createMemoryAuditRepository,
   type AuditRepository,
@@ -644,14 +646,28 @@ describe("renderDossierPdf real Chromium smoke", () => {
     );
   }
 
-  it.skipIf(!existsSync(chromium.executablePath()))(
+  it(
     "renders a real PDF when local Chromium is installed",
     async ({ skip }) => {
+      const smokeRequired = isPdfSmokeRequired(process.env);
+      if (!existsSync(chromium.executablePath())) {
+        if (smokeRequired) {
+          throw new Error(
+            "Playwright Chromium is required for the PDF smoke test.",
+          );
+        }
+        skip();
+        return;
+      }
+
       let pdf: Buffer;
       try {
         pdf = await renderDossierPdf(createDossier());
       } catch (error) {
-        if (isKnownMacOsSandboxLaunchFailure(error)) {
+        if (
+          !smokeRequired &&
+          isKnownMacOsSandboxLaunchFailure(error)
+        ) {
           skip();
           return;
         }
@@ -666,6 +682,18 @@ describe("renderDossierPdf real Chromium smoke", () => {
       }
     },
   );
+});
+
+describe("PDF smoke requirement policy", () => {
+  it.each([
+    [{}, false],
+    [{ CI: "true" }, true],
+    [{ CI: "" }, true],
+    [{ REQUIRE_PDF_SMOKE: "1" }, true],
+    [{ REQUIRE_PDF_SMOKE: "0" }, false],
+  ])("evaluates environment %j as %s", (environment, expected) => {
+    expect(isPdfSmokeRequired(environment)).toBe(expected);
+  });
 });
 
 function createRouteHandler(options: {
