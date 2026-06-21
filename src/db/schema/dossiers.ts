@@ -27,6 +27,7 @@ export const dossiers = pgTable(
     meetingId: text("meeting_id"),
     version: integer("version").notNull(),
     previousVersionId: text("previous_version_id"),
+    previousVersion: integer("previous_version"),
     executiveSummary: text("executive_summary").notNull(),
     companyOverview: text("company_overview").notNull(),
     businessModel: text("business_model").notNull(),
@@ -72,9 +73,19 @@ export const dossiers = pgTable(
       ],
     }),
     foreignKey({
-      name: "dossiers_workspace_previous_version_fk",
-      columns: [table.workspaceId, table.previousVersionId],
-      foreignColumns: [table.workspaceId, table.id],
+      name: "dossiers_version_chain_fk",
+      columns: [
+        table.workspaceId,
+        table.campaignCompanyId,
+        table.previousVersionId,
+        table.previousVersion,
+      ],
+      foreignColumns: [
+        table.workspaceId,
+        table.campaignCompanyId,
+        table.id,
+        table.version,
+      ],
     }),
     uniqueIndex("dossiers_workspace_id_unique").on(
       table.workspaceId,
@@ -83,6 +94,12 @@ export const dossiers = pgTable(
     uniqueIndex("dossiers_workspace_company_version_unique").on(
       table.workspaceId,
       table.campaignCompanyId,
+      table.version,
+    ),
+    uniqueIndex("dossiers_version_chain_target_unique").on(
+      table.workspaceId,
+      table.campaignCompanyId,
+      table.id,
       table.version,
     ),
     index("dossiers_latest_idx").on(
@@ -94,6 +111,10 @@ export const dossiers = pgTable(
     check(
       "dossiers_version_positive_check",
       sql`${table.version} > 0`,
+    ),
+    check(
+      "dossiers_version_chain_check",
+      sql`(${table.version} = 1 and ${table.previousVersionId} is null and ${table.previousVersion} is null) or (${table.version} > 1 and ${table.previousVersionId} is not null and ${table.previousVersion} is not null and ${table.previousVersion} = ${table.version} - 1)`,
     ),
     check(
       "dossiers_contacts_json_array_check",

@@ -56,6 +56,13 @@ export const dossierItemSchema = z.discriminatedUnion("kind", [
   recommendationItemSchema,
 ]);
 
+export const dossierEvidenceItemSchema = z.discriminatedUnion("kind", [
+  confirmedNeedItemSchema,
+  researchedFactItemSchema,
+  hypothesisItemSchema,
+  estimateItemSchema,
+]);
+
 const contactSchema = z.object({
   name: nonemptyTextSchema,
   role: nonemptyTextSchema,
@@ -67,28 +74,76 @@ const competitorItemSchema = z.union([
   hypothesisItemSchema,
 ]);
 
-export const dossierSchema = z.object({
-  id: nonemptyIdSchema,
-  workspaceId: nonemptyIdSchema,
-  campaignCompanyId: nonemptyIdSchema,
-  meetingId: nonemptyIdSchema.nullable(),
-  version: z.number().int().positive(),
-  previousVersionId: nonemptyIdSchema.nullable(),
-  executiveSummary: trimmedTextSchema,
-  companyOverview: trimmedTextSchema,
-  businessModel: trimmedTextSchema,
-  contacts: z.array(contactSchema),
-  conversationSummary: trimmedTextSchema,
-  confirmedNeeds: z.array(confirmedNeedItemSchema),
-  researchedFacts: z.array(researchedFactItemSchema),
-  hypotheses: z.array(hypothesisItemSchema),
-  estimates: z.array(estimateItemSchema),
-  competitors: z.array(competitorItemSchema),
-  recommendations: z.array(recommendationItemSchema),
-  pendingQuestions: uniqueTrimmedStringsSchema,
-  createdAt: z.date(),
-  createdBy: nonemptyIdSchema,
-}).strict();
+const dossierObjectSchema = z
+  .object({
+    id: nonemptyIdSchema,
+    workspaceId: nonemptyIdSchema,
+    campaignCompanyId: nonemptyIdSchema,
+    meetingId: nonemptyIdSchema.nullable(),
+    version: z.number().int().positive(),
+    previousVersionId: nonemptyIdSchema.nullable(),
+    executiveSummary: trimmedTextSchema,
+    companyOverview: trimmedTextSchema,
+    businessModel: trimmedTextSchema,
+    contacts: z.array(contactSchema),
+    conversationSummary: trimmedTextSchema,
+    confirmedNeeds: z.array(confirmedNeedItemSchema),
+    researchedFacts: z.array(researchedFactItemSchema),
+    hypotheses: z.array(hypothesisItemSchema),
+    estimates: z.array(estimateItemSchema),
+    competitors: z.array(competitorItemSchema),
+    recommendations: z.array(recommendationItemSchema),
+    pendingQuestions: uniqueTrimmedStringsSchema,
+    createdAt: z.date(),
+    createdBy: nonemptyIdSchema,
+  })
+  .strict();
+
+export const dossierEditableContentSchema = dossierObjectSchema
+  .pick({
+    meetingId: true,
+    executiveSummary: true,
+    companyOverview: true,
+    businessModel: true,
+    contacts: true,
+    conversationSummary: true,
+    confirmedNeeds: true,
+    researchedFacts: true,
+    hypotheses: true,
+    estimates: true,
+    competitors: true,
+    recommendations: true,
+    pendingQuestions: true,
+  })
+  .partial()
+  .strict();
+
+export const dossierSchema = dossierObjectSchema.superRefine(
+  (dossier, context) => {
+    const categories = [
+      "confirmedNeeds",
+      "researchedFacts",
+      "hypotheses",
+      "estimates",
+      "competitors",
+      "recommendations",
+    ] as const;
+    const seenIds = new Set<string>();
+
+    for (const category of categories) {
+      dossier[category].forEach((item, index) => {
+        if (seenIds.has(item.id)) {
+          context.addIssue({
+            code: "custom",
+            path: [category, index, "id"],
+            message: "Dossier item ids must be globally unique",
+          });
+        }
+        seenIds.add(item.id);
+      });
+    }
+  },
+);
 
 export type DossierItem = z.output<typeof dossierItemSchema>;
 export type Dossier = z.output<typeof dossierSchema>;

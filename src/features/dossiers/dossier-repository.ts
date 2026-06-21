@@ -9,11 +9,15 @@ export type DossierErrorCode =
   | "DOSSIER_ALREADY_EXISTS"
   | "DOSSIER_NOT_FOUND"
   | "DOSSIER_ITEM_NOT_FOUND"
+  | "INVALID_DOSSIER_REFERENCE"
   | "STALE_DOSSIER_VERSION";
 
 export class DossierError extends Error {
-  constructor(readonly code: DossierErrorCode) {
-    super(code);
+  constructor(
+    readonly code: DossierErrorCode,
+    options?: ErrorOptions,
+  ) {
+    super(code, options);
     this.name = "DossierError";
   }
 }
@@ -156,6 +160,35 @@ export type DossierDbExecutor = Pick<
   "insert" | "select"
 >;
 
+function dossierPersistenceValues(record: Dossier) {
+  return {
+    ...record,
+    previousVersion: record.version === 1 ? null : record.version - 1,
+  };
+}
+
+function parsePersistedDossier(record: unknown): Dossier {
+  if (
+    typeof record === "object" &&
+    record !== null &&
+    "previousVersion" in record
+  ) {
+    const dossier = { ...record };
+    delete dossier.previousVersion;
+    return dossierSchema.parse(dossier);
+  }
+  return dossierSchema.parse(record);
+}
+
+function getDatabaseErrorCode(error: unknown): string | undefined {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+    ? error.code
+    : undefined;
+}
+
 export function createDrizzleDossierPersistenceExecutor(
   database: DossierDbExecutor,
 ): DossierPersistenceExecutor {
@@ -181,7 +214,7 @@ export function createDrizzleDossierPersistenceExecutor(
     async insertInitial(record) {
       const [created] = await database
         .insert(dossiers)
-        .values(record)
+        .values(dossierPersistenceValues(record))
         .onConflictDoNothing({
           target: [
             dossiers.workspaceId,
@@ -203,7 +236,7 @@ export function createDrizzleDossierPersistenceExecutor(
       }
       const [created] = await database
         .insert(dossiers)
-        .values(record)
+        .values(dossierPersistenceValues(record))
         .onConflictDoNothing({
           target: [
             dossiers.workspaceId,
@@ -252,11 +285,27 @@ export function createDrizzleDossierRepository(
       if (parsed.version !== 1 || parsed.previousVersionId !== null) {
         throw new DossierError("DOSSIER_ALREADY_EXISTS");
       }
-      const created = await executor.insertInitial(parsed);
+      let created: unknown | null;
+      try {
+        created = await executor.insertInitial(parsed);
+      } catch (error) {
+        const databaseCode = getDatabaseErrorCode(error);
+        if (databaseCode === "23505") {
+          throw new DossierError("DOSSIER_ALREADY_EXISTS", {
+            cause: error,
+          });
+        }
+        if (databaseCode === "23503") {
+          throw new DossierError("INVALID_DOSSIER_REFERENCE", {
+            cause: error,
+          });
+        }
+        throw error;
+      }
       if (created === null) {
         throw new DossierError("DOSSIER_ALREADY_EXISTS");
       }
-      return dossierSchema.parse(created);
+      return parsePersistedDossier(created);
     },
     async appendVersion(dossier, expectedLatestVersion) {
       const parsed = dossierSchema.parse(dossier);
@@ -270,23 +319,23 @@ export function createDrizzleDossierRepository(
       if (created === null) {
         throw new DossierError("STALE_DOSSIER_VERSION");
       }
-      return dossierSchema.parse(created);
+      return parsePersistedDossier(created);
     },
     async getLatest(workspaceId, campaignCompanyId) {
       const record = await executor.getLatest({
         workspaceId,
         campaignCompanyId,
       });
-      return record === null ? null : dossierSchema.parse(record);
+      return record === null ? null : parsePersistedDossier(record);
     },
     async getById(workspaceId, id) {
       const record = await executor.getById({ workspaceId, id });
-      return record === null ? null : dossierSchema.parse(record);
+      return record === null ? null : parsePersistedDossier(record);
     },
     async listVersions(workspaceId, campaignCompanyId) {
       return (
         await executor.listVersions({ workspaceId, campaignCompanyId })
-      ).map((record) => dossierSchema.parse(record));
+      ).map((record) => parsePersistedDossier(record));
     },
   };
 }

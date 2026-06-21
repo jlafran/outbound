@@ -261,6 +261,35 @@ describe("dossierSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("rejects duplicate item ids across categories", () => {
+    expect(() =>
+      dossierSchema.parse({
+        ...createDossier(),
+        researchedFacts: [
+          {
+            id: "shared-item",
+            kind: "researched_fact",
+            statement: "A sourced fact",
+            sourceUrl: "https://example.com/fact",
+            confidence: "high",
+            assumptions: [],
+            hidden: false,
+          },
+        ],
+        recommendations: [
+          {
+            id: "shared-item",
+            kind: "recommendation",
+            statement: "Act on the sourced fact",
+            confidence: "medium",
+            assumptions: [],
+            hidden: false,
+          },
+        ],
+      }),
+    ).toThrowError(/unique/i);
+  });
 });
 
 describe("DossierService", () => {
@@ -350,6 +379,43 @@ describe("DossierService", () => {
     });
 
     expect(created.researchedFacts[0].hidden).toBe(false);
+  });
+
+  it("rejects recommendations supplied through evidence", async () => {
+    const unitOfWork = createMemoryDossierUnitOfWork();
+    const service = new DossierService(unitOfWork, {
+      async read() {
+        return {
+          ...structuredClone(sourceMaterial),
+          evidence: [
+            ...structuredClone(sourceMaterial.evidence),
+            {
+              id: "misplaced-recommendation",
+              kind: "recommendation",
+              statement: "This belongs in the recommendations field",
+              confidence: "medium",
+              assumptions: [],
+              hidden: false,
+            },
+          ],
+        };
+      },
+    } as DossierSourceReader);
+
+    await expect(
+      service.build({
+        workspaceId: "workspace-1",
+        campaignCompanyId: "campaign-company-1",
+        meetingId: null,
+        actorId: "user-1",
+      }),
+    ).rejects.toThrow();
+    expect(
+      await unitOfWork.dossierRepository.listVersions(
+        "workspace-1",
+        "campaign-company-1",
+      ),
+    ).toEqual([]);
   });
 
   it("rejects building a second initial version", async () => {
@@ -446,6 +512,38 @@ describe("DossierService", () => {
     expect(hidden.version).toBe(2);
     expect(hidden.researchedFacts[0].hidden).toBe(true);
     expect(first.researchedFacts[0].hidden).toBe(false);
+  });
+
+  it("returns a stable error when hiding an unknown item", async () => {
+    const unitOfWork = createMemoryDossierUnitOfWork();
+    const service = new DossierService(
+      unitOfWork,
+      createSourceReader(),
+    );
+    await service.build({
+      workspaceId: "workspace-1",
+      campaignCompanyId: "campaign-company-1",
+      meetingId: null,
+      actorId: "user-1",
+    });
+
+    await expect(
+      service.hideItem({
+        workspaceId: "workspace-1",
+        campaignCompanyId: "campaign-company-1",
+        actorId: "user-2",
+        expectedVersion: 1,
+        itemId: "missing-item",
+      }),
+    ).rejects.toMatchObject({
+      code: "DOSSIER_ITEM_NOT_FOUND",
+    });
+    expect(
+      await unitOfWork.dossierRepository.listVersions(
+        "workspace-1",
+        "campaign-company-1",
+      ),
+    ).toHaveLength(1);
   });
 
   it("rejects identity changes and invalid edited items", async () => {
@@ -686,6 +784,69 @@ describe("DossierRepository", () => {
     );
   });
 
+  it.each([
+    ["23505", "DOSSIER_ALREADY_EXISTS"],
+    ["23503", "INVALID_DOSSIER_REFERENCE"],
+  ] as const)(
+    "maps initial insert PostgreSQL error %s to %s",
+    async (databaseCode, dossierCode) => {
+      const executor: DossierPersistenceExecutor = {
+        async insertInitial() {
+          throw Object.assign(new Error("database rejected insert"), {
+            code: databaseCode,
+          });
+        },
+        async insertVersionIfLatest() {
+          return null;
+        },
+        async getLatest() {
+          return null;
+        },
+        async getById() {
+          return null;
+        },
+        async listVersions() {
+          return [];
+        },
+      };
+
+      await expect(
+        createDrizzleDossierRepository(executor).createInitial(
+          createDossier(),
+        ),
+      ).rejects.toMatchObject({ code: dossierCode });
+    },
+  );
+
+  it("does not obscure unknown initial insert failures", async () => {
+    const failure = Object.assign(new Error("database unavailable"), {
+      code: "08006",
+    });
+    const executor: DossierPersistenceExecutor = {
+      async insertInitial() {
+        throw failure;
+      },
+      async insertVersionIfLatest() {
+        return null;
+      },
+      async getLatest() {
+        return null;
+      },
+      async getById() {
+        return null;
+      },
+      async listVersions() {
+        return [];
+      },
+    };
+
+    await expect(
+      createDrizzleDossierRepository(executor).createInitial(
+        createDossier(),
+      ),
+    ).rejects.toBe(failure);
+  });
+
   it("parses every persistence row and preserves ascending order", async () => {
     const calls: string[] = [];
     const first = createDossier();
@@ -824,16 +985,30 @@ describe("dossiers schema", () => {
             "workspace_id,created_by",
       ),
     ).toBe(true);
+    expect(
+      foreignKeys.some(
+        (reference) =>
+          reference.foreignTable === dossiers &&
+          reference.columns.map((column) => column.name).join(",") ===
+            "workspace_id,campaign_company_id,previous_version_id,previous_version" &&
+          reference.foreignColumns
+            .map((column) => column.name)
+            .join(",") ===
+            "workspace_id,campaign_company_id,id,version",
+      ),
+    ).toBe(true);
     expect(config.indexes.map((index) => index.config.name)).toEqual(
       expect.arrayContaining([
         "dossiers_workspace_id_unique",
         "dossiers_workspace_company_version_unique",
+        "dossiers_version_chain_target_unique",
         "dossiers_latest_idx",
       ]),
     );
     expect(config.checks.map((check) => check.name)).toEqual(
       expect.arrayContaining([
         "dossiers_version_positive_check",
+        "dossiers_version_chain_check",
         "dossiers_contacts_json_array_check",
         "dossiers_confirmed_needs_json_array_check",
         "dossiers_researched_facts_json_array_check",
@@ -844,5 +1019,8 @@ describe("dossiers schema", () => {
         "dossiers_pending_questions_json_array_check",
       ]),
     );
+    expect(
+      config.columns.map((column) => column.name),
+    ).toContain("previous_version");
   });
 });

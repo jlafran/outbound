@@ -33,7 +33,7 @@ CREATE TABLE "dossiers" (
 ALTER TABLE "dossiers" ADD CONSTRAINT "dossiers_workspace_id_workspaces_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "dossiers" ADD CONSTRAINT "dossiers_workspace_campaign_company_fk" FOREIGN KEY ("workspace_id","campaign_company_id") REFERENCES "public"."campaign_companies"("workspace_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "dossiers" ADD CONSTRAINT "dossiers_workspace_creator_member_fk" FOREIGN KEY ("workspace_id","created_by") REFERENCES "public"."workspace_members"("workspace_id","user_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "dossiers" ADD CONSTRAINT "dossiers_workspace_previous_version_fk" FOREIGN KEY ("workspace_id","previous_version_id") REFERENCES "public"."dossiers"("workspace_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "dossiers_workspace_id_unique" ON "dossiers" USING btree ("workspace_id","id");--> statement-breakpoint
+ALTER TABLE "dossiers" ADD CONSTRAINT "dossiers_workspace_previous_version_fk" FOREIGN KEY ("workspace_id","previous_version_id") REFERENCES "public"."dossiers"("workspace_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "dossiers_workspace_company_version_unique" ON "dossiers" USING btree ("workspace_id","campaign_company_id","version");--> statement-breakpoint
 CREATE INDEX "dossiers_latest_idx" ON "dossiers" USING btree ("workspace_id","campaign_company_id","version" desc,"id");

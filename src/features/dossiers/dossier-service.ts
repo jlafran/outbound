@@ -7,14 +7,15 @@ import {
   type DossierRepository,
 } from "./dossier-repository";
 import {
-  dossierItemSchema,
+  dossierEditableContentSchema,
+  dossierEvidenceItemSchema,
   dossierSchema,
   type Dossier,
 } from "./dossier-schema";
 import type { DossierUnitOfWork } from "./dossier-unit-of-work";
 
 type DossierInput = z.input<typeof dossierSchema>;
-type DossierItemInput = z.input<typeof dossierItemSchema>;
+type DossierEvidenceItemInput = z.input<typeof dossierEvidenceItemSchema>;
 
 export type DossierSourceMaterial = Pick<
   DossierInput,
@@ -27,7 +28,7 @@ export type DossierSourceMaterial = Pick<
   | "recommendations"
   | "pendingQuestions"
 > & {
-  evidence: DossierItemInput[];
+  evidence: DossierEvidenceItemInput[];
 };
 
 export interface DossierSourceReader {
@@ -37,24 +38,7 @@ export interface DossierSourceReader {
   }): Promise<DossierSourceMaterial>;
 }
 
-const editablePatchSchema = dossierSchema
-  .pick({
-    meetingId: true,
-    executiveSummary: true,
-    companyOverview: true,
-    businessModel: true,
-    contacts: true,
-    conversationSummary: true,
-    confirmedNeeds: true,
-    researchedFacts: true,
-    hypotheses: true,
-    estimates: true,
-    competitors: true,
-    recommendations: true,
-    pendingQuestions: true,
-  })
-  .partial()
-  .strict();
+const editablePatchSchema = dossierEditableContentSchema;
 
 export type DossierPatch = z.input<typeof editablePatchSchema>;
 
@@ -123,7 +107,7 @@ export class DossierService {
           campaignCompanyId: input.campaignCompanyId,
         });
         const evidence = source.evidence.map((item) =>
-          dossierItemSchema.parse(item),
+          dossierEvidenceItemSchema.parse(item),
         );
         const dossier = dossierSchema.parse({
           id: this.dependencies.createId(),
