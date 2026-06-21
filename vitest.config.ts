@@ -5,6 +5,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
+    exclude: ["tests/e2e/**", "**/node_modules/**", "**/.git/**"],
     env: {
       DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/outreach",
       AUTH_SECRET: "test-auth-secret-with-at-least-32-characters",
