@@ -788,12 +788,16 @@ describe("DossierRepository", () => {
     ["23505", "DOSSIER_ALREADY_EXISTS"],
     ["23503", "INVALID_DOSSIER_REFERENCE"],
   ] as const)(
-    "maps initial insert PostgreSQL error %s to %s",
+    "maps nested initial insert PostgreSQL error %s to %s",
     async (databaseCode, dossierCode) => {
       const executor: DossierPersistenceExecutor = {
         async insertInitial() {
-          throw Object.assign(new Error("database rejected insert"), {
-            code: databaseCode,
+          throw Object.assign(new Error("Drizzle query failed"), {
+            cause: {
+              cause: {
+                code: databaseCode,
+              },
+            },
           });
         },
         async insertVersionIfLatest() {
@@ -818,10 +822,95 @@ describe("DossierRepository", () => {
     },
   );
 
-  it("does not obscure unknown initial insert failures", async () => {
-    const failure = Object.assign(new Error("database unavailable"), {
-      code: "08006",
-    });
+  it.each([
+    ["23505", "STALE_DOSSIER_VERSION"],
+    ["23503", "INVALID_DOSSIER_REFERENCE"],
+  ] as const)(
+    "maps nested append PostgreSQL error %s to %s",
+    async (databaseCode, dossierCode) => {
+      const executor: DossierPersistenceExecutor = {
+        async insertInitial(record) {
+          return record;
+        },
+        async insertVersionIfLatest() {
+          throw Object.assign(new Error("Drizzle query failed"), {
+            cause: {
+              code: databaseCode,
+            },
+          });
+        },
+        async getLatest() {
+          return null;
+        },
+        async getById() {
+          return null;
+        },
+        async listVersions() {
+          return [];
+        },
+      };
+
+      await expect(
+        createDrizzleDossierRepository(executor).appendVersion(
+          createDossier({
+            id: "dossier-2",
+            version: 2,
+            previousVersionId: "dossier-1",
+          }),
+          1,
+        ),
+      ).rejects.toMatchObject({ code: dossierCode });
+    },
+  );
+
+  it.each(["create", "append"] as const)(
+    "does not obscure unknown %s failures through nested causes",
+    async (operation) => {
+      const failure = Object.assign(new Error("Drizzle query failed"), {
+        cause: Object.assign(new Error("database unavailable"), {
+          code: "08006",
+        }),
+      });
+      const executor: DossierPersistenceExecutor = {
+        async insertInitial() {
+          throw failure;
+        },
+        async insertVersionIfLatest() {
+          throw failure;
+        },
+        async getLatest() {
+          return null;
+        },
+        async getById() {
+          return null;
+        },
+        async listVersions() {
+          return [];
+        },
+      };
+      const repository = createDrizzleDossierRepository(executor);
+      const promise =
+        operation === "create"
+          ? repository.createInitial(createDossier())
+          : repository.appendVersion(
+              createDossier({
+                id: "dossier-2",
+                version: 2,
+                previousVersionId: "dossier-1",
+              }),
+              1,
+            );
+
+      await expect(promise).rejects.toBe(failure);
+    },
+  );
+
+  it("preserves cyclic unknown errors without looping", async () => {
+    const failure = new Error("cyclic Drizzle error") as Error & {
+      cause?: unknown;
+    };
+    const nested = { cause: failure };
+    failure.cause = nested;
     const executor: DossierPersistenceExecutor = {
       async insertInitial() {
         throw failure;

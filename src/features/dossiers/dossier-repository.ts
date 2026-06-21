@@ -181,12 +181,54 @@ function parsePersistedDossier(record: unknown): Dossier {
 }
 
 function getDatabaseErrorCode(error: unknown): string | undefined {
-  return typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof error.code === "string"
-    ? error.code
-    : undefined;
+  const visited = new Set<object>();
+  let current = error;
+
+  for (let depth = 0; depth < 16; depth += 1) {
+    if (
+      (typeof current !== "object" || current === null) &&
+      typeof current !== "function"
+    ) {
+      return undefined;
+    }
+    if (visited.has(current)) {
+      return undefined;
+    }
+    visited.add(current);
+
+    try {
+      if (
+        "code" in current &&
+        typeof (current as { code?: unknown }).code === "string"
+      ) {
+        return (current as { code: string }).code;
+      }
+      current =
+        "cause" in current
+          ? (current as { cause?: unknown }).cause
+          : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+function mapPersistenceError(
+  error: unknown,
+  uniqueConflict: "DOSSIER_ALREADY_EXISTS" | "STALE_DOSSIER_VERSION",
+): never {
+  const databaseCode = getDatabaseErrorCode(error);
+  if (databaseCode === "23505") {
+    throw new DossierError(uniqueConflict, { cause: error });
+  }
+  if (databaseCode === "23503") {
+    throw new DossierError("INVALID_DOSSIER_REFERENCE", {
+      cause: error,
+    });
+  }
+  throw error;
 }
 
 export function createDrizzleDossierPersistenceExecutor(
@@ -289,18 +331,7 @@ export function createDrizzleDossierRepository(
       try {
         created = await executor.insertInitial(parsed);
       } catch (error) {
-        const databaseCode = getDatabaseErrorCode(error);
-        if (databaseCode === "23505") {
-          throw new DossierError("DOSSIER_ALREADY_EXISTS", {
-            cause: error,
-          });
-        }
-        if (databaseCode === "23503") {
-          throw new DossierError("INVALID_DOSSIER_REFERENCE", {
-            cause: error,
-          });
-        }
-        throw error;
+        mapPersistenceError(error, "DOSSIER_ALREADY_EXISTS");
       }
       if (created === null) {
         throw new DossierError("DOSSIER_ALREADY_EXISTS");
@@ -312,10 +343,15 @@ export function createDrizzleDossierRepository(
       if (parsed.version !== expectedLatestVersion + 1) {
         throw new DossierError("STALE_DOSSIER_VERSION");
       }
-      const created = await executor.insertVersionIfLatest(
-        parsed,
-        expectedLatestVersion,
-      );
+      let created: unknown | null;
+      try {
+        created = await executor.insertVersionIfLatest(
+          parsed,
+          expectedLatestVersion,
+        );
+      } catch (error) {
+        mapPersistenceError(error, "STALE_DOSSIER_VERSION");
+      }
       if (created === null) {
         throw new DossierError("STALE_DOSSIER_VERSION");
       }
