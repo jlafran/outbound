@@ -133,19 +133,131 @@ test("creates an offer and completes a campaign dry-run", async ({
   await expect(
     page.getByRole("link", { name: "Ver estado del dossier" }),
   ).toHaveAttribute("href", /\/dossiers\/.+/);
-  await page.getByRole("link", { name: "Ver estado del dossier" }).click();
+  await Promise.all([
+    page.waitForURL(/\/dossiers\/.+/),
+    page.getByRole("link", { name: "Ver estado del dossier" }).click(),
+  ]);
+  const versionOneUrl = page.url();
   await expect(
-    page.getByRole("heading", { name: "Dossier disponible" }),
+    page.getByRole("heading", { name: "Dossier", exact: true }),
   ).toBeVisible();
-  await expect(page.getByText(/^ID: /)).toBeVisible();
-  await expect(page.getByText("Estado: generado")).toBeVisible();
-  await expect(page.getByText("Versión: 1")).toBeVisible();
+  await expect(page.getByText("Versión 1", { exact: true })).toBeVisible();
   await expect(
-    page.getByRole("button", {
-      name: /editar|guardar|exportar|descargar/i,
-    }),
-  ).toHaveCount(0);
+    page.getByRole("heading", { name: "Resumen ejecutivo" }),
+  ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: /editar|exportar|descargar/i }),
+    page.getByRole("heading", { name: "Empresa y modelo de negocio" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Conversación" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Hechos investigados" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Hipótesis" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Recomendaciones" }),
+  ).toBeVisible();
+  await expect(page.getByText("Confianza: alta").first()).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Fuente", exact: true }).first(),
+  ).toHaveAttribute("href", /^https:\/\/example\.com\//);
+  await expect(
+    page.getByText("Supuestos", { exact: true }).first(),
+  ).toBeVisible();
+
+  const markdownV1 = page.getByRole("link", {
+    name: "Exportar Markdown",
+  });
+  const pdfV1 = page.getByRole("link", { name: "Exportar PDF" });
+  await expect(markdownV1).toHaveAttribute(
+    "href",
+    /\/api\/dossiers\/[^/]+\/markdown$/,
+  );
+  await expect(pdfV1).toHaveAttribute(
+    "href",
+    /\/api\/dossiers\/[^/]+\/pdf$/,
+  );
+
+  await page
+    .getByRole("button", { name: "Editar recomendaciones" })
+    .click();
+  await page
+    .getByLabel("Nueva recomendación")
+    .fill("Priorizar automatización del triage de consultas.");
+  await page
+    .getByRole("button", { name: "Guardar nueva versión" })
+    .last()
+    .click();
+
+  await expect(page.getByText("Versión 2", { exact: true })).toBeVisible();
+  const recommendationArticle = page.getByRole("article", {
+    name: "Priorizar automatización del triage de consultas.",
+  });
+  await expect(
+    recommendationArticle
+      .locator("p")
+      .filter({ hasText: "Priorizar automatización del triage de consultas." }),
+  ).toBeVisible();
+  const versionTwoUrl = page.url();
+  expect(versionTwoUrl).not.toBe(versionOneUrl);
+  const versionTwoId = new URL(versionTwoUrl).pathname.split("/").at(-1);
+  await expect(
+    page.getByRole("link", { name: "Exportar Markdown" }),
+  ).toHaveAttribute("href", `/api/dossiers/${versionTwoId}/markdown`);
+  await expect(
+    page.getByRole("link", { name: "Exportar PDF" }),
+  ).toHaveAttribute("href", `/api/dossiers/${versionTwoId}/pdf`);
+
+  const originalHypothesis =
+    "La coordinación entre tráfico y atención al cliente podría incluir tareas manuales repetitivas.";
+  const editedHypothesis =
+    "La coordinación entre tráfico y atención al cliente requiere automatización del triage.";
+  const hypothesisEditor = page.locator(
+    `details[aria-label="Editar elemento: ${originalHypothesis}"]`,
+  );
+  await hypothesisEditor.locator("summary").click();
+  await hypothesisEditor.getByLabel("Declaración").fill(editedHypothesis);
+  await hypothesisEditor
+    .getByRole("button", { name: "Guardar nueva versión" })
+    .click();
+
+  await expect(page.getByText("Versión 3", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("article", { name: editedHypothesis })
+      .locator("p")
+      .filter({ hasText: editedHypothesis }),
+  ).toBeVisible();
+  const versionThreeUrl = page.url();
+  expect(versionThreeUrl).not.toBe(versionTwoUrl);
+
+  await page.goto(versionOneUrl);
+  await expect(page.getByText("Versión 1", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("article", { name: originalHypothesis })
+      .locator("p")
+      .filter({ hasText: originalHypothesis }),
+  ).toBeVisible();
+  await expect(page.getByText(editedHypothesis)).toHaveCount(0);
+
+  await page.goto(versionThreeUrl);
+  const addedRecommendation = page.getByRole("article", {
+    name: "Priorizar automatización del triage de consultas.",
+  });
+  await addedRecommendation
+    .getByRole("button", { name: "Ocultar" })
+    .click();
+
+  await expect(page.getByText("Versión 4", { exact: true })).toBeVisible();
+  const hiddenRecommendation = page.getByRole("article", {
+    name: "Priorizar automatización del triage de consultas.",
+  });
+  await expect(hiddenRecommendation.locator(".hidden-marker")).toBeVisible();
+  await expect(
+    hiddenRecommendation.getByRole("button", { name: "Ocultar" }),
   ).toHaveCount(0);
 });

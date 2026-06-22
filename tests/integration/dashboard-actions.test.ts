@@ -14,6 +14,11 @@ import {
   recommendNichesSubmission,
 } from "@/features/campaigns/campaign-action-logic";
 import { createCampaignAction } from "@/features/campaigns/campaign-actions";
+import {
+  addRecommendationSubmission,
+  editDossierItemSubmission,
+  hideDossierItemSubmission,
+} from "@/features/dossiers/dossier-actions";
 import { createOfferSubmission } from "@/features/offers/offer-action-logic";
 import { createOfferAction } from "@/features/offers/offer-actions";
 
@@ -61,6 +66,13 @@ function campaignForm(offerId: string) {
 function campaignMutationForm(campaignId: string, expectedVersion: number) {
   const formData = new FormData();
   formData.set("campaignId", campaignId);
+  formData.set("expectedVersion", String(expectedVersion));
+  return formData;
+}
+
+function dossierMutationForm(dossierId: string, expectedVersion: number) {
+  const formData = new FormData();
+  formData.set("dossierId", dossierId);
   formData.set("expectedVersion", String(expectedVersion));
   return formData;
 }
@@ -129,6 +141,28 @@ async function prepareDiscoveryReady(
     throw new Error("Expected niche approval");
   }
   return approved;
+}
+
+async function generateDossier(services: AppServices) {
+  const offerId = await createOffer(services);
+  const campaignId = await createCampaign(services, offerId);
+  const ready = await prepareDiscoveryReady(services, campaignId);
+  const generated = await generateDryRunSubmission(
+    { services, resolveContext: resolveContext(workspaceOne) },
+    campaignMutationForm(campaignId, ready.version),
+  );
+  expect(generated.status).toBe("success");
+  if (generated.status !== "success") {
+    throw new Error("Expected dossier generation");
+  }
+  const dossier = await services.dossierRepository.getById(
+    workspaceOne.workspaceId,
+    generated.dossierId,
+  );
+  if (!dossier) {
+    throw new Error("Expected dossier");
+  }
+  return dossier;
 }
 
 describe("dashboard action submissions", () => {
@@ -628,6 +662,206 @@ describe("dashboard action submissions", () => {
       campaignCompanyId: first.companies[0]?.campaignCompanyId,
       version: 1,
     });
+  });
+
+  it("adds a recommendation as a new immutable dossier version", async () => {
+    const dossier = await generateDossier(services);
+    const form = dossierMutationForm(dossier.id, dossier.version);
+    form.set(
+      "statement",
+      "Priorizar automatización del triage de consultas.",
+    );
+
+    const result = await addRecommendationSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      form,
+    );
+
+    expect(result).toMatchObject({
+      status: "success",
+      version: 2,
+    });
+    if (result.status !== "success") {
+      throw new Error("Expected recommendation edit");
+    }
+    expect(result.dossierId).not.toBe(dossier.id);
+    await expect(
+      services.dossierRepository.getById(
+        workspaceOne.workspaceId,
+        dossier.id,
+      ),
+    ).resolves.toEqual(dossier);
+    const created = await services.dossierRepository.getById(
+      workspaceOne.workspaceId,
+      result.dossierId,
+    );
+    expect(created).toMatchObject({
+      previousVersionId: dossier.id,
+      recommendations: expect.arrayContaining([
+        {
+          statement: "Priorizar automatización del triage de consultas.",
+          kind: "recommendation",
+          confidence: "medium",
+          assumptions: [],
+          hidden: false,
+          id: expect.any(String),
+        },
+      ]),
+    });
+    expect(created?.recommendations).toHaveLength(
+      dossier.recommendations.length + 1,
+    );
+  });
+
+  it("returns a field error for a short recommendation", async () => {
+    const dossier = await generateDossier(services);
+    const form = dossierMutationForm(dossier.id, dossier.version);
+    form.set("statement", "x");
+
+    const result = await addRecommendationSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      form,
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      fieldErrors: {
+        statement: ["Ingresá una recomendación de al menos 2 caracteres."],
+      },
+    });
+  });
+
+  it("maps stale dossier edits to a friendly error", async () => {
+    const dossier = await generateDossier(services);
+    const first = dossierMutationForm(dossier.id, dossier.version);
+    first.set("statement", "Primera recomendación válida.");
+    await addRecommendationSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      first,
+    );
+    const stale = dossierMutationForm(dossier.id, dossier.version);
+    stale.set("statement", "Segunda recomendación válida.");
+
+    const result = await addRecommendationSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      stale,
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      globalError:
+        "El dossier cambió en otra operación. Actualizá la página e intentá de nuevo.",
+    });
+  });
+
+  it("does not expose a dossier from another workspace", async () => {
+    const dossier = await generateDossier(services);
+    const form = dossierMutationForm(dossier.id, dossier.version);
+    form.set("statement", "Recomendación de otro espacio.");
+
+    const result = await addRecommendationSubmission(
+      { services, resolveContext: resolveContext(workspaceTwo) },
+      form,
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      globalError: "El dossier no existe.",
+    });
+  });
+
+  it("edits exactly one item while preserving its epistemic metadata", async () => {
+    const dossier = await generateDossier(services);
+    const item = dossier.hypotheses[0];
+    if (!item) {
+      throw new Error("Expected hypothesis");
+    }
+    const form = dossierMutationForm(dossier.id, dossier.version);
+    form.set("category", "hypotheses");
+    form.set("itemId", item.id);
+    form.set(
+      "statement",
+      "La coordinación operativa requiere automatización del triage.",
+    );
+    form.set("hidden", "false");
+
+    const result = await editDossierItemSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      form,
+    );
+
+    expect(result).toMatchObject({ status: "success", version: 2 });
+    if (result.status !== "success") {
+      throw new Error("Expected item edit");
+    }
+    const edited = await services.dossierRepository.getById(
+      workspaceOne.workspaceId,
+      result.dossierId,
+    );
+    expect(edited?.hypotheses[0]).toEqual({
+      ...item,
+      statement:
+        "La coordinación operativa requiere automatización del triage.",
+    });
+  });
+
+  it("rejects category-kind mismatches without leaking internals", async () => {
+    const dossier = await generateDossier(services);
+    const item = dossier.hypotheses[0];
+    if (!item) {
+      throw new Error("Expected hypothesis");
+    }
+    const form = dossierMutationForm(dossier.id, dossier.version);
+    form.set("category", "researchedFacts");
+    form.set("itemId", item.id);
+    form.set("statement", "Texto válido para intentar editar.");
+    form.set("hidden", "false");
+
+    const result = await editDossierItemSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      form,
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      globalError: "El elemento no existe en la categoría indicada.",
+    });
+  });
+
+  it("hides an item once and rejects hiding it again without a new version", async () => {
+    const dossier = await generateDossier(services);
+    const item = dossier.recommendations[0];
+    if (!item) {
+      throw new Error("Expected recommendation");
+    }
+    const form = dossierMutationForm(dossier.id, dossier.version);
+    form.set("itemId", item.id);
+    const first = await hideDossierItemSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      form,
+    );
+    expect(first).toMatchObject({ status: "success", version: 2 });
+    if (first.status !== "success") {
+      throw new Error("Expected hide");
+    }
+    const repeated = dossierMutationForm(first.dossierId, first.version);
+    repeated.set("itemId", item.id);
+
+    const result = await hideDossierItemSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      repeated,
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      globalError: "El elemento ya está oculto.",
+    });
+    await expect(
+      services.dossierRepository.listVersions(
+        workspaceOne.workspaceId,
+        dossier.campaignCompanyId,
+      ),
+    ).resolves.toHaveLength(2);
   });
 
   it("does not allow a campaign to reference another workspace offer", async () => {

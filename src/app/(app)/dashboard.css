@@ -43,6 +43,12 @@ button:disabled {
   opacity: 0.5;
 }
 
+.secondary-button,
+.secondary-link {
+  background: #e8eef5;
+  color: #173653;
+}
+
 :focus-visible {
   outline: 3px solid #f0a23a;
   outline-offset: 2px;
@@ -205,6 +211,105 @@ button:disabled {
   padding: 1rem;
 }
 
+.dossier-page,
+.dossier-item-list,
+.dossier-item-actions,
+.recommendation-editor {
+  display: grid;
+  gap: 1rem;
+}
+
+.dossier-section > h2 {
+  margin-top: 0;
+}
+
+.dossier-version-row,
+.dossier-item-heading {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.version-badge,
+.epistemic-label,
+.hidden-marker {
+  border-radius: 999px;
+  font-size: 0.86rem;
+  font-weight: 750;
+  margin: 0;
+  padding: 0.3rem 0.65rem;
+}
+
+.version-badge,
+.epistemic-label {
+  background: #e8eef5;
+  color: #173653;
+}
+
+.hidden-marker {
+  background: #eee5df;
+  color: #65402f;
+}
+
+.dossier-item {
+  border-top: 1px solid #d8dee7;
+  padding-top: 1rem;
+}
+
+.dossier-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.dossier-item.is-hidden {
+  background: #f5f2ef;
+  border-radius: 0.6rem;
+  opacity: 0.72;
+  padding: 1rem;
+}
+
+.item-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+.item-metadata dt {
+  font-size: 0.8rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.item-metadata dd {
+  margin: 0.2rem 0 0;
+}
+
+.assumptions h3 {
+  font-size: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.dossier-editor {
+  border: 1px solid #c5ced9;
+  border-radius: 0.55rem;
+  padding: 0.75rem;
+}
+
+.dossier-editor summary {
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.dossier-editor form {
+  margin-top: 1rem;
+}
+
+.contact-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
 @media (max-width: 36rem) {
   .app-header {
     align-items: flex-start;
@@ -214,5 +319,12 @@ button:disabled {
 
   .score-grid {
     grid-template-columns: 1fr;
+  }
+
+  .dossier-version-row,
+  .dossier-item-heading,
+  .item-metadata {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
