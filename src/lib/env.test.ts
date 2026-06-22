@@ -29,4 +29,41 @@ describe("parseEnv", () => {
   it("rejects an authentication secret shorter than 32 characters", () => {
     expect(() => parseEnv({ ...validEnv, AUTH_SECRET: "too-short" })).toThrow();
   });
+
+  it("allows auth provider secrets to be absent at import and build time", () => {
+    const parsed = parseEnv({
+      DATABASE_URL: validEnv.DATABASE_URL,
+      ALLOWED_EMAILS: "",
+    });
+
+    expect(parsed.ALLOWED_EMAILS).toEqual([]);
+    expect(parsed.AUTH_SECRET).toBeUndefined();
+    expect(parsed.GOOGLE_CLIENT_ID).toBeUndefined();
+    expect(parsed.GOOGLE_CLIENT_SECRET).toBeUndefined();
+    expect(parsed.DEV_AUTH_PASSWORD).toBeUndefined();
+  });
+
+  it("accepts optional Google and development credential configuration", () => {
+    const parsed = parseEnv({
+      ...validEnv,
+      GOOGLE_CLIENT_ID: "google-client",
+      GOOGLE_CLIENT_SECRET: "google-secret",
+      DEV_AUTH_PASSWORD: "development-password",
+    });
+
+    expect(parsed).toMatchObject({
+      GOOGLE_CLIENT_ID: "google-client",
+      GOOGLE_CLIENT_SECRET: "google-secret",
+      DEV_AUTH_PASSWORD: "development-password",
+    });
+  });
+
+  it("rejects a configured development password shorter than 12 characters", () => {
+    expect(() =>
+      parseEnv({
+        ...validEnv,
+        DEV_AUTH_PASSWORD: "too-short",
+      }),
+    ).toThrow();
+  });
 });
