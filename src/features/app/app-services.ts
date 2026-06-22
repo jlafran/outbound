@@ -4,6 +4,8 @@ import {
 import {
   createMemoryCampaignDryRunProjection,
   createMemoryNicheRecommendationProjection,
+  createUnsupportedCampaignDryRunProjection,
+  createUnsupportedNicheRecommendationProjection,
   type CampaignDryRunProjection,
   type NicheRecommendationProjection,
 } from "@/features/campaigns/campaign-projections";
@@ -203,6 +205,17 @@ const unsupportedDossierSourceReader: DossierSourceReader = {
   },
 };
 
+export function createProductionProjections(): {
+  nicheRecommendationProjection: NicheRecommendationProjection;
+  campaignDryRunProjection: CampaignDryRunProjection;
+} {
+  return {
+    nicheRecommendationProjection:
+      createUnsupportedNicheRecommendationProjection(),
+    campaignDryRunProjection: createUnsupportedCampaignDryRunProjection(),
+  };
+}
+
 async function createProductionAppServices(): Promise<AppServices> {
   const { db } = await import("@/db/client");
   const offerUnitOfWork = createDrizzleOfferUnitOfWork(db);
@@ -218,10 +231,10 @@ async function createProductionAppServices(): Promise<AppServices> {
   const dossierRepository = createDrizzleDossierRepository(
     createDrizzleDossierPersistenceExecutor(db),
   );
-  const nicheRecommendationProjection =
-    createMemoryNicheRecommendationProjection();
-  const campaignDryRunProjection =
-    createMemoryCampaignDryRunProjection();
+  const {
+    nicheRecommendationProjection,
+    campaignDryRunProjection,
+  } = createProductionProjections();
   const dossierService = new DossierService(
     dossierUnitOfWork,
     unsupportedDossierSourceReader,

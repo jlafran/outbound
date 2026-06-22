@@ -39,6 +39,34 @@ export interface CampaignDryRunProjection {
   ): Promise<void>;
 }
 
+export function createUnsupportedNicheRecommendationProjection(): NicheRecommendationProjection {
+  return {
+    async get() {
+      throw new Error("NICHE_PROJECTION_NOT_CONFIGURED");
+    },
+    async save() {
+      throw new Error("NICHE_PROJECTION_NOT_CONFIGURED");
+    },
+  };
+}
+
+export function createUnsupportedCampaignDryRunProjection(): CampaignDryRunProjection {
+  return {
+    async get() {
+      throw new Error("DRY_RUN_PROJECTION_NOT_CONFIGURED");
+    },
+    async getOrCreate() {
+      throw new Error("DRY_RUN_PROJECTION_NOT_CONFIGURED");
+    },
+    async getCompany() {
+      throw new Error("DRY_RUN_PROJECTION_NOT_CONFIGURED");
+    },
+    async stageCompanies() {
+      throw new Error("DRY_RUN_PROJECTION_NOT_CONFIGURED");
+    },
+  };
+}
+
 function projectionKey(workspaceId: string, campaignId: string) {
   return `${workspaceId}\0${campaignId}`;
 }
