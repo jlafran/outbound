@@ -27,6 +27,7 @@ export interface DossierRepository {
   appendVersion(
     dossier: Dossier,
     expectedLatestVersion: number,
+    expectedLatestId: string,
   ): Promise<Dossier>;
   getLatest(
     workspaceId: string,
@@ -90,7 +91,7 @@ export function createMemoryDossierRepository(
         return structuredClone(stored);
       });
     },
-    appendVersion(dossier, expectedLatestVersion) {
+    appendVersion(dossier, expectedLatestVersion, expectedLatestId) {
       return enqueue(async () => {
         const parsed = dossierSchema.parse(dossier);
         const versions = series(
@@ -102,8 +103,9 @@ export function createMemoryDossierRepository(
         if (
           !latest ||
           latest.version !== expectedLatestVersion ||
+          latest.id !== expectedLatestId ||
           parsed.version !== expectedLatestVersion + 1 ||
-          parsed.previousVersionId !== latest.id ||
+          parsed.previousVersionId !== expectedLatestId ||
           records.has(parsed.id)
         ) {
           throw new DossierError("STALE_DOSSIER_VERSION");
@@ -149,6 +151,7 @@ export interface DossierPersistenceExecutor {
   insertVersionIfLatest(
     record: Dossier,
     expectedLatestVersion: number,
+    expectedLatestId: string,
   ): Promise<unknown | null>;
   getLatest(identity: DossierSeriesIdentity): Promise<unknown | null>;
   getById(identity: DossierIdentity): Promise<unknown | null>;
@@ -267,11 +270,16 @@ export function createDrizzleDossierPersistenceExecutor(
         .returning();
       return created ?? null;
     },
-    async insertVersionIfLatest(record, expectedLatestVersion) {
+    async insertVersionIfLatest(
+      record,
+      expectedLatestVersion,
+      expectedLatestId,
+    ) {
       const latest = await getLatest(record);
       if (
         !latest ||
         latest.version !== expectedLatestVersion ||
+        latest.id !== expectedLatestId ||
         latest.id !== record.previousVersionId
       ) {
         return null;
@@ -338,7 +346,7 @@ export function createDrizzleDossierRepository(
       }
       return parsePersistedDossier(created);
     },
-    async appendVersion(dossier, expectedLatestVersion) {
+    async appendVersion(dossier, expectedLatestVersion, expectedLatestId) {
       const parsed = dossierSchema.parse(dossier);
       if (parsed.version !== expectedLatestVersion + 1) {
         throw new DossierError("STALE_DOSSIER_VERSION");
@@ -348,6 +356,7 @@ export function createDrizzleDossierRepository(
         created = await executor.insertVersionIfLatest(
           parsed,
           expectedLatestVersion,
+          expectedLatestId,
         );
       } catch (error) {
         mapPersistenceError(error, "STALE_DOSSIER_VERSION");

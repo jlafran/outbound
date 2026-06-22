@@ -1,50 +1,50 @@
-import type { NextRequest } from "next/server";
-
 import { createMarkdownDossierHandler } from "@/features/dossiers/dossier-markdown";
+import { resolveInternalRequestContext } from "@/features/app/internal-action-context";
 
 export async function GET(
   request: Request,
   context: { params: Promise<{ id?: string }> },
 ) {
-  const [
-    { db },
-    { createDrizzleAuditRepository },
-    {
-      createDrizzleDossierPersistenceExecutor,
-      createDrizzleDossierRepository,
-    },
-    { env },
-    { getToken },
-  ] = await Promise.all([
-    import("@/db/client"),
-    import("@/features/audit/audit-repository"),
-    import("@/features/dossiers/dossier-repository"),
-    import("@/lib/env"),
-    import("next-auth/jwt"),
-  ]);
-
+  const isE2E =
+    process.env.OUTREACH_E2E_MODE === "1" &&
+    process.env.NODE_ENV !== "production";
   const markdownDossierHandler = createMarkdownDossierHandler({
-    dossierRepository: createDrizzleDossierRepository(
-      createDrizzleDossierPersistenceExecutor(db),
-    ),
-    auditRepository: createDrizzleAuditRepository(db),
-    async resolveRequestContext(routeRequest) {
-      const token = await getToken({
-        req: routeRequest as NextRequest,
-        secret: env.AUTH_SECRET,
-      });
-
-      return token &&
-        typeof token.sub === "string" &&
-        token.sub.length > 0 &&
-        typeof token.workspaceId === "string" &&
-        token.workspaceId.length > 0
-        ? {
-            workspaceId: token.workspaceId,
-            actorId: token.sub,
-          }
-        : null;
-    },
+    ...(isE2E
+      ? await (async () => {
+          const [
+            { createMemoryAuditRepository },
+            { getAppServices },
+          ] = await Promise.all([
+            import("@/features/audit/audit-repository"),
+            import("@/features/app/app-services"),
+          ]);
+          const { dossierRepository } = await getAppServices();
+          return {
+            dossierRepository,
+            auditRepository: createMemoryAuditRepository(),
+          };
+        })()
+      : await (async () => {
+          const [
+            { db },
+            { createDrizzleAuditRepository },
+            {
+              createDrizzleDossierPersistenceExecutor,
+              createDrizzleDossierRepository,
+            },
+          ] = await Promise.all([
+            import("@/db/client"),
+            import("@/features/audit/audit-repository"),
+            import("@/features/dossiers/dossier-repository"),
+          ]);
+          return {
+            dossierRepository: createDrizzleDossierRepository(
+              createDrizzleDossierPersistenceExecutor(db),
+            ),
+            auditRepository: createDrizzleAuditRepository(db),
+          };
+        })()),
+    resolveRequestContext: resolveInternalRequestContext,
   });
 
   return markdownDossierHandler(request, context);

@@ -146,37 +146,94 @@ export class DossierService {
     );
   }
 
-  private async appendEdit(
+  private async appendEditFromLoaded(
     repository: DossierRepository,
+    loaded: Dossier,
     input: {
-      workspaceId: string;
-      campaignCompanyId: string;
       actorId: string;
       expectedVersion: number;
       patch: DossierPatch;
     },
+    expectedLatestId: string,
   ): Promise<Dossier> {
-    const latest = await repository.getLatest(
-      input.workspaceId,
-      input.campaignCompanyId,
-    );
-    if (!latest) {
-      throw new DossierError("DOSSIER_NOT_FOUND");
-    }
-    if (latest.version !== input.expectedVersion) {
+    if (loaded.version !== input.expectedVersion) {
       throw new DossierError("STALE_DOSSIER_VERSION");
     }
     const patch = editablePatchSchema.parse(input.patch);
     const next = dossierSchema.parse({
-      ...latest,
+      ...loaded,
       ...patch,
       id: this.dependencies.createId(),
-      version: latest.version + 1,
-      previousVersionId: latest.id,
+      version: loaded.version + 1,
+      previousVersionId: loaded.id,
       createdAt: this.dependencies.now(),
       createdBy: input.actorId,
     });
-    return repository.appendVersion(next, input.expectedVersion);
+    return repository.appendVersion(
+      next,
+      input.expectedVersion,
+      expectedLatestId,
+    );
+  }
+
+  async editById(input: {
+    workspaceId: string;
+    campaignCompanyId: string;
+    dossierId: string;
+    actorId: string;
+    expectedVersion: number;
+    expectedLatestId: string;
+    patch: DossierPatch;
+    operation?: "edit" | "hide";
+  }): Promise<Dossier> {
+    return this.unitOfWork.run(
+      async ({ dossierRepository, auditRepository }) => {
+        const loaded = await dossierRepository.getById(
+          input.workspaceId,
+          input.dossierId,
+        );
+        if (!loaded) {
+          throw new DossierError("DOSSIER_NOT_FOUND");
+        }
+        if (loaded.version !== input.expectedVersion) {
+          throw new DossierError("STALE_DOSSIER_VERSION");
+        }
+        const latest = await dossierRepository.getLatest(
+          input.workspaceId,
+          input.campaignCompanyId,
+        );
+        if (
+          !latest ||
+          latest.id !== loaded.id ||
+          latest.id !== input.expectedLatestId ||
+          latest.version !== input.expectedVersion
+        ) {
+          throw new DossierError("STALE_DOSSIER_VERSION");
+        }
+        const patch = editablePatchSchema.parse(input.patch);
+        const next = dossierSchema.parse({
+          ...loaded,
+          ...patch,
+          id: this.dependencies.createId(),
+          version: loaded.version + 1,
+          previousVersionId: loaded.id,
+          createdAt: this.dependencies.now(),
+          createdBy: input.actorId,
+        });
+        const created = await dossierRepository.appendVersion(
+          next,
+          input.expectedVersion,
+          input.expectedLatestId,
+        );
+        await this.audit(
+          auditRepository,
+          created,
+          input.actorId,
+          input.operation ?? "edit",
+        );
+        return created;
+      },
+    );
   }
 
   async edit(input: {
@@ -188,7 +245,19 @@ export class DossierService {
   }): Promise<Dossier> {
     return this.unitOfWork.run(
       async ({ dossierRepository, auditRepository }) => {
-        const created = await this.appendEdit(dossierRepository, input);
+        const latest = await dossierRepository.getLatest(
+          input.workspaceId,
+          input.campaignCompanyId,
+        );
+        if (!latest) {
+          throw new DossierError("DOSSIER_NOT_FOUND");
+        }
+        const created = await this.appendEditFromLoaded(
+          dossierRepository,
+          latest,
+          input,
+          latest.id,
+        );
         await this.audit(auditRepository, created, input.actorId, "edit");
         return created;
       },
@@ -210,6 +279,9 @@ export class DossierService {
         );
         if (!latest) {
           throw new DossierError("DOSSIER_NOT_FOUND");
+        }
+        if (latest.version !== input.expectedVersion) {
+          throw new DossierError("STALE_DOSSIER_VERSION");
         }
         const categoryNames = [
           "confirmedNeeds",
@@ -235,10 +307,16 @@ export class DossierService {
         if (!found) {
           throw new DossierError("DOSSIER_ITEM_NOT_FOUND");
         }
-        const created = await this.appendEdit(dossierRepository, {
-          ...input,
-          patch,
-        });
+        const created = await this.appendEditFromLoaded(
+          dossierRepository,
+          latest,
+          {
+            actorId: input.actorId,
+            expectedVersion: input.expectedVersion,
+            patch,
+          },
+          latest.id,
+        );
         await this.audit(auditRepository, created, input.actorId, "hide");
         return created;
       },

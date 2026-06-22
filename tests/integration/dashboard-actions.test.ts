@@ -770,6 +770,34 @@ describe("dashboard action submissions", () => {
     });
   });
 
+  it("rejects adding a recommendation from an older dossier id even when the version matches", async () => {
+    const dossier = await generateDossier(services);
+    const current = await addRecommendationSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      (() => {
+        const form = dossierMutationForm(dossier.id, dossier.version);
+        form.set("statement", "Recomendación actualizada.");
+        return form;
+      })(),
+    );
+    if (current.status !== "success") {
+      throw new Error("Expected current recommendation to succeed");
+    }
+    const stale = dossierMutationForm(dossier.id, current.version);
+    stale.set("statement", "Recomendación enviada desde una versión vieja.");
+
+    const result = await addRecommendationSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      stale,
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      globalError:
+        "El dossier cambió en otra operación. Actualizá la página e intentá de nuevo.",
+    });
+  });
+
   it("edits exactly one item while preserving its epistemic metadata", async () => {
     const dossier = await generateDossier(services);
     const item = dossier.hypotheses[0];
@@ -802,6 +830,45 @@ describe("dashboard action submissions", () => {
       ...item,
       statement:
         "La coordinación operativa requiere automatización del triage.",
+    });
+  });
+
+  it("rejects editing a recommendation from an older dossier id even when the version matches", async () => {
+    const dossier = await generateDossier(services);
+    const current = await addRecommendationSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      (() => {
+        const form = dossierMutationForm(dossier.id, dossier.version);
+        form.set("statement", "Recomendación base para editar.");
+        return form;
+      })(),
+    );
+    if (current.status !== "success") {
+      throw new Error("Expected recommendation creation");
+    }
+    const created = await services.dossierRepository.getById(
+      workspaceOne.workspaceId,
+      current.dossierId,
+    );
+    const recommendation = created?.recommendations[0];
+    if (!recommendation) {
+      throw new Error("Expected recommendation");
+    }
+    const stale = dossierMutationForm(dossier.id, current.version);
+    stale.set("category", "recommendations");
+    stale.set("itemId", recommendation.id);
+    stale.set("statement", "Edición enviada desde un dossier viejo.");
+    stale.set("hidden", "false");
+
+    const result = await editDossierItemSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      stale,
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      globalError:
+        "El dossier cambió en otra operación. Actualizá la página e intentá de nuevo.",
     });
   });
 
@@ -862,6 +929,42 @@ describe("dashboard action submissions", () => {
         dossier.campaignCompanyId,
       ),
     ).resolves.toHaveLength(2);
+  });
+
+  it("rejects hiding an item from an older dossier id even when the version matches", async () => {
+    const dossier = await generateDossier(services);
+    const current = await addRecommendationSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      (() => {
+        const form = dossierMutationForm(dossier.id, dossier.version);
+        form.set("statement", "Recomendación para ocultar.");
+        return form;
+      })(),
+    );
+    if (current.status !== "success") {
+      throw new Error("Expected recommendation creation");
+    }
+    const created = await services.dossierRepository.getById(
+      workspaceOne.workspaceId,
+      current.dossierId,
+    );
+    const recommendation = created?.recommendations[0];
+    if (!recommendation) {
+      throw new Error("Expected recommendation");
+    }
+    const stale = dossierMutationForm(dossier.id, current.version);
+    stale.set("itemId", recommendation.id);
+
+    const result = await hideDossierItemSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      stale,
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      globalError:
+        "El dossier cambió en otra operación. Actualizá la página e intentá de nuevo.",
+    });
   });
 
   it("does not allow a campaign to reference another workspace offer", async () => {

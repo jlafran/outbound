@@ -16,6 +16,7 @@ import {
 
 import { DossierError } from "./dossier-repository";
 import type { Dossier, DossierItem } from "./dossier-schema";
+import type { DossierPatch } from "./dossier-service";
 
 type DossierMutationSuccess = {
   dossierId: string;
@@ -150,6 +151,30 @@ async function loadDossier(
   return dossier;
 }
 
+async function loadMutableDossier(
+  dependencies: DossierActionDependencies,
+  context: InternalActionContext,
+  dossierId: string,
+  expectedVersion: number,
+): Promise<{ loaded: Dossier; latest: Dossier }> {
+  const loaded = await loadDossier(dependencies, context, dossierId);
+  if (loaded.version !== expectedVersion) {
+    throw new DossierError("STALE_DOSSIER_VERSION");
+  }
+  const latest = await dependencies.services.dossierRepository.getLatest(
+    context.workspaceId,
+    loaded.campaignCompanyId,
+  );
+  if (
+    !latest ||
+    latest.id !== loaded.id ||
+    latest.version !== expectedVersion
+  ) {
+    throw new DossierError("STALE_DOSSIER_VERSION");
+  }
+  return { loaded, latest };
+}
+
 function success(dossier: Dossier): ActionState<DossierMutationSuccess> {
   return {
     status: "success",
@@ -185,19 +210,22 @@ export async function addRecommendationSubmission(
     return { status: "error", fieldErrors: fieldErrors(parsed.error) };
   }
   return withContext(dependencies, async (context) => {
-    const current = await loadDossier(
+    const { loaded, latest } = await loadMutableDossier(
       dependencies,
       context,
       parsed.data.dossierId,
+      parsed.data.expectedVersion,
     );
-    const created = await dependencies.services.dossierService.edit({
+    const created = await dependencies.services.dossierService.editById({
       workspaceId: context.workspaceId,
-      campaignCompanyId: current.campaignCompanyId,
+      campaignCompanyId: loaded.campaignCompanyId,
+      dossierId: loaded.id,
       actorId: context.actorId,
       expectedVersion: parsed.data.expectedVersion,
+      expectedLatestId: latest.id,
       patch: {
         recommendations: [
-          ...current.recommendations,
+          ...loaded.recommendations,
           {
             id: crypto.randomUUID(),
             kind: "recommendation",
@@ -228,12 +256,13 @@ export async function editDossierItemSubmission(
     return { status: "error", fieldErrors: fieldErrors(parsed.error) };
   }
   return withContext(dependencies, async (context) => {
-    const current = await loadDossier(
+    const { loaded, latest } = await loadMutableDossier(
       dependencies,
       context,
       parsed.data.dossierId,
+      parsed.data.expectedVersion,
     );
-    const matches = current[parsed.data.category].filter(
+    const matches = loaded[parsed.data.category].filter(
       (item) => item.id === parsed.data.itemId,
     );
     const item = matches[0];
@@ -245,7 +274,7 @@ export async function editDossierItemSubmission(
       throw new DossierError("DOSSIER_ITEM_NOT_FOUND");
     }
     const patch = {
-      [parsed.data.category]: current[parsed.data.category].map((candidate) =>
+      [parsed.data.category]: loaded[parsed.data.category].map((candidate) =>
         candidate.id === item.id
           ? {
               ...candidate,
@@ -255,11 +284,13 @@ export async function editDossierItemSubmission(
           : candidate,
       ),
     };
-    const created = await dependencies.services.dossierService.edit({
+    const created = await dependencies.services.dossierService.editById({
       workspaceId: context.workspaceId,
-      campaignCompanyId: current.campaignCompanyId,
+      campaignCompanyId: loaded.campaignCompanyId,
+      dossierId: loaded.id,
       actorId: context.actorId,
       expectedVersion: parsed.data.expectedVersion,
+      expectedLatestId: latest.id,
       patch,
     });
     return success(created);
@@ -278,14 +309,15 @@ export async function hideDossierItemSubmission(
     return { status: "error", fieldErrors: fieldErrors(parsed.error) };
   }
   return withContext(dependencies, async (context) => {
-    const current = await loadDossier(
+    const { loaded, latest } = await loadMutableDossier(
       dependencies,
       context,
       parsed.data.dossierId,
+      parsed.data.expectedVersion,
     );
     const items: DossierItem[] = [];
     for (const category of categoryValues) {
-      for (const item of current[category]) {
+      for (const item of loaded[category]) {
         items.push(item);
       }
     }
@@ -299,12 +331,25 @@ export async function hideDossierItemSubmission(
         globalError: "El elemento ya está oculto.",
       };
     }
-    const created = await dependencies.services.dossierService.hideItem({
+    const patch = Object.fromEntries(
+      categoryValues.map((category) => [
+        category,
+        loaded[category].map((candidate) =>
+          candidate.id === parsed.data.itemId
+            ? { ...candidate, hidden: true }
+            : candidate,
+        ),
+      ]),
+    ) as DossierPatch;
+    const created = await dependencies.services.dossierService.editById({
       workspaceId: context.workspaceId,
-      campaignCompanyId: current.campaignCompanyId,
+      campaignCompanyId: loaded.campaignCompanyId,
+      dossierId: loaded.id,
       actorId: context.actorId,
       expectedVersion: parsed.data.expectedVersion,
-      itemId: parsed.data.itemId,
+      expectedLatestId: latest.id,
+      patch,
+      operation: "hide",
     });
     return success(created);
   });

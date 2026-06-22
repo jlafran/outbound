@@ -156,6 +156,7 @@ export function RecommendationEditor({
     addRecommendationAction,
     initialActionState,
   );
+  const regionId = `recommendation-editor-${dossierId}`;
   const errorId = "new-recommendation-error";
   const hasError =
     Boolean(state.globalError) ||
@@ -164,6 +165,7 @@ export function RecommendationEditor({
   return (
     <div className="recommendation-editor">
       <button
+        aria-controls={regionId}
         aria-expanded={open}
         className="secondary-button"
         onClick={() => setOpen((current) => !current)}
@@ -172,24 +174,26 @@ export function RecommendationEditor({
         Editar recomendaciones
       </button>
       {open ? (
-        <form action={action} className="panel form-grid" noValidate>
-          <HiddenVersionFields dossierId={dossierId} version={version} />
-          <div className="field">
-            <label htmlFor="new-recommendation">Nueva recomendación</label>
-            <textarea
-              aria-describedby={hasError ? errorId : undefined}
-              aria-invalid={hasError || undefined}
-              id="new-recommendation"
-              name="statement"
-            />
-          </div>
-          <ActionErrors field="statement" id={errorId} state={state} />
-          <div>
-            <button disabled={pending} type="submit">
-              {pending ? "Guardando…" : "Guardar nueva versión"}
-            </button>
-          </div>
-        </form>
+        <div id={regionId} role="region">
+          <form action={action} className="panel form-grid" noValidate>
+            <HiddenVersionFields dossierId={dossierId} version={version} />
+            <div className="field">
+              <label htmlFor="new-recommendation">Nueva recomendación</label>
+              <textarea
+                aria-describedby={hasError ? errorId : undefined}
+                aria-invalid={hasError || undefined}
+                id="new-recommendation"
+                name="statement"
+              />
+            </div>
+            <ActionErrors field="statement" id={errorId} state={state} />
+            <div>
+              <button disabled={pending} type="submit">
+                {pending ? "Guardando…" : "Guardar nueva versión"}
+              </button>
+            </div>
+          </form>
+        </div>
       ) : null}
     </div>
   );

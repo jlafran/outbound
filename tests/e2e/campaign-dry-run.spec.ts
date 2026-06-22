@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { expect, test } from "@playwright/test";
 
 test.describe.configure({ mode: "serial" });
@@ -210,6 +212,50 @@ test("creates an offer and completes a campaign dry-run", async ({
   await expect(
     page.getByRole("link", { name: "Exportar PDF" }),
   ).toHaveAttribute("href", `/api/dossiers/${versionTwoId}/pdf`);
+
+  const markdownResponse = await page.request.get(
+    `/api/dossiers/${versionTwoId}/markdown`,
+  );
+  expect(markdownResponse.status()).toBe(200);
+  expect(markdownResponse.headers()["content-type"]).toContain(
+    "text/markdown",
+  );
+  expect(await markdownResponse.text()).toContain(
+    "# Dossier previo a la reunión",
+  );
+
+  const [markdownDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("link", { name: "Exportar Markdown" }).click(),
+  ]);
+  const markdownPath = await markdownDownload.path();
+  expect(markdownPath).not.toBeNull();
+  if (!markdownPath) {
+    throw new Error("Expected Markdown download path");
+  }
+  expect(await readFile(markdownPath, "utf8")).toContain(
+    "# Dossier previo a la reunión",
+  );
+
+  const pdfResponse = await page.request.get(`/api/dossiers/${versionTwoId}/pdf`);
+  expect(pdfResponse.status()).toBe(200);
+  expect(pdfResponse.headers()["content-type"]).toBe("application/pdf");
+  expect(Buffer.from(await pdfResponse.body()).subarray(0, 5).toString()).toBe(
+    "%PDF-",
+  );
+
+  const [pdfDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("link", { name: "Exportar PDF" }).click(),
+  ]);
+  const pdfPath = await pdfDownload.path();
+  expect(pdfPath).not.toBeNull();
+  if (!pdfPath) {
+    throw new Error("Expected PDF download path");
+  }
+  expect(
+    Buffer.from(await readFile(pdfPath)).subarray(0, 5).toString(),
+  ).toBe("%PDF-");
 
   const originalHypothesis =
     "La coordinación entre tráfico y atención al cliente podría incluir tareas manuales repetitivas.";

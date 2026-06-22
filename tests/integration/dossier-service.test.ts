@@ -488,6 +488,51 @@ describe("DossierService", () => {
     ).toEqual(first);
   });
 
+  it("rejects stale edits that target an older dossier id even if the version matches", async () => {
+    const unitOfWork = createMemoryDossierUnitOfWork();
+    const service = new DossierService(
+      unitOfWork,
+      createSourceReader(),
+    );
+    const first = await service.build({
+      workspaceId: "workspace-1",
+      campaignCompanyId: "campaign-company-1",
+      meetingId: null,
+      actorId: "user-1",
+    });
+    const second = await service.edit({
+      workspaceId: "workspace-1",
+      campaignCompanyId: "campaign-company-1",
+      actorId: "user-2",
+      expectedVersion: 1,
+      patch: { executiveSummary: "Current summary" },
+    });
+
+    await expect(
+      (service as unknown as {
+        editById(input: {
+          workspaceId: string;
+          campaignCompanyId: string;
+          dossierId: string;
+          actorId: string;
+          expectedVersion: number;
+          expectedLatestId: string;
+          patch: { executiveSummary: string };
+        }): Promise<Dossier>;
+      }).editById({
+        workspaceId: "workspace-1",
+        campaignCompanyId: "campaign-company-1",
+        dossierId: first.id,
+        actorId: "user-3",
+        expectedVersion: second.version,
+        expectedLatestId: second.id,
+        patch: { executiveSummary: "Should be rejected" },
+      }),
+    ).rejects.toMatchObject({
+      code: "STALE_DOSSIER_VERSION",
+    });
+  });
+
   it("hides an item by creating a new version", async () => {
     const unitOfWork = createMemoryDossierUnitOfWork();
     const service = new DossierService(
@@ -741,6 +786,7 @@ describe("DossierRepository", () => {
           createdAt: new Date("2026-06-22T12:00:00.000Z"),
         }),
         1,
+        first.id,
       ),
     ).rejects.toMatchObject({
       code: "STALE_DOSSIER_VERSION",
@@ -778,6 +824,7 @@ describe("DossierRepository", () => {
           previousVersionId: "dossier-1",
         }),
         1,
+        "dossier-1",
       ),
     ).rejects.toEqual(
       new DossierError("STALE_DOSSIER_VERSION"),
@@ -851,14 +898,15 @@ describe("DossierRepository", () => {
       };
 
       await expect(
-        createDrizzleDossierRepository(executor).appendVersion(
-          createDossier({
-            id: "dossier-2",
-            version: 2,
-            previousVersionId: "dossier-1",
-          }),
-          1,
-        ),
+      createDrizzleDossierRepository(executor).appendVersion(
+        createDossier({
+          id: "dossier-2",
+          version: 2,
+          previousVersionId: "dossier-1",
+        }),
+        1,
+        "dossier-1",
+      ),
       ).rejects.toMatchObject({ code: dossierCode });
     },
   );
@@ -899,6 +947,7 @@ describe("DossierRepository", () => {
                 previousVersionId: "dossier-1",
               }),
               1,
+              "dossier-1",
             );
 
       await expect(promise).rejects.toBe(failure);

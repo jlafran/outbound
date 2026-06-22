@@ -64,11 +64,12 @@ export function createMemoryDossierUnitOfWork(
         committedDossierRepository.createInitial(record),
       );
     },
-    appendVersion(record, expectedLatestVersion) {
+    appendVersion(record, expectedLatestVersion, expectedLatestId) {
       return enqueue(() =>
         committedDossierRepository.appendVersion(
           record,
           expectedLatestVersion,
+          expectedLatestId,
         ),
       );
     },
