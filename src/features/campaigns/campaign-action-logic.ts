@@ -228,43 +228,40 @@ export async function approveNichesSubmission(
     const ids = formData
       .getAll("nicheIds")
       .filter((value): value is string => typeof value === "string");
-    const campaign =
-      await dependencies.services.campaignService.approveNiches(
+    const current =
+      await dependencies.services.campaignRepository.getById(
         context.workspaceId,
         parsed.data.campaignId,
-        ids,
-        parsed.data.expectedVersion,
-        context.actorId,
       );
-    return {
-      status: "success",
-      campaignId: campaign.id,
-      version: campaign.version,
-    };
-    },
-  );
-}
-
-export async function moveToDiscoveryReadySubmission(
-  dependencies: CampaignActionDependencies,
-  formData: FormData,
-): Promise<ActionState<CampaignMutationSuccess>> {
-  return withContext<CampaignMutationSuccess>(
-    dependencies,
-    async (context) => {
-    const parsed = parseMutation(formData);
-    if (!parsed.success) {
+    if (!current) {
+      throw new CampaignError("CAMPAIGN_NOT_FOUND");
+    }
+    const approved =
+      current.state === "niche_review" &&
+      current.approvedNicheIds.length > 0
+        ? current
+        : await dependencies.services.campaignService.approveNiches(
+            context.workspaceId,
+            parsed.data.campaignId,
+            ids,
+            parsed.data.expectedVersion,
+            context.actorId,
+          );
+    let campaign;
+    try {
+      campaign =
+        await dependencies.services.campaignService.moveToDiscoveryReady(
+          context.workspaceId,
+          parsed.data.campaignId,
+          approved.version,
+        );
+    } catch {
       return {
         status: "error",
-        fieldErrors: zodFieldErrors(parsed.error),
+        globalError:
+          "Los nichos quedaron aprobados, pero no pudimos preparar discovery. Intentá aprobarlos nuevamente.",
       };
     }
-    const campaign =
-      await dependencies.services.campaignService.moveToDiscoveryReady(
-        context.workspaceId,
-        parsed.data.campaignId,
-        parsed.data.expectedVersion,
-      );
     return {
       status: "success",
       campaignId: campaign.id,

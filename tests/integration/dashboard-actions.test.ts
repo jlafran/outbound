@@ -10,7 +10,6 @@ import {
   approveNichesSubmission,
   createCampaignSubmission,
   generateDryRunSubmission,
-  moveToDiscoveryReadySubmission,
   moveToNicheReviewSubmission,
   recommendNichesSubmission,
 } from "@/features/campaigns/campaign-action-logic";
@@ -129,16 +128,7 @@ async function prepareDiscoveryReady(
   if (approved.status !== "success") {
     throw new Error("Expected niche approval");
   }
-
-  const ready = await moveToDiscoveryReadySubmission(
-    { services, resolveContext: resolveContext(workspaceOne) },
-    campaignMutationForm(campaignId, approved.version),
-  );
-  expect(ready.status).toBe("success");
-  if (ready.status !== "success") {
-    throw new Error("Expected discovery ready");
-  }
-  return ready;
+  return approved;
 }
 
 describe("dashboard action submissions", () => {
@@ -285,6 +275,115 @@ describe("dashboard action submissions", () => {
       status: "error",
       globalError: "Seleccioná al menos un nicho.",
     });
+  });
+
+  it("approves niches and immediately makes the campaign discovery ready", async () => {
+    const offerId = await createOffer(services);
+    const campaignId = await createCampaign(services, offerId);
+    const recommended = await recommendNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      campaignMutationForm(campaignId, 1),
+    );
+    expect(recommended.status).toBe("success");
+    if (recommended.status !== "success") {
+      throw new Error("Expected recommendations");
+    }
+    const review = await moveToNicheReviewSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      campaignMutationForm(campaignId, recommended.version),
+    );
+    expect(review.status).toBe("success");
+    if (review.status !== "success") {
+      throw new Error("Expected niche review");
+    }
+
+    const approveForm = campaignMutationForm(campaignId, review.version);
+    approveForm.append("nicheIds", "logistica-ar");
+    const result = await approveNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      approveForm,
+    );
+
+    expect(result).toEqual({
+      status: "success",
+      campaignId,
+      version: review.version + 2,
+    });
+    await expect(
+      services.campaignRepository.getById(
+        workspaceOne.workspaceId,
+        campaignId,
+      ),
+    ).resolves.toMatchObject({
+      state: "discovery_ready",
+      approvedNicheIds: ["logistica-ar"],
+      version: review.version + 2,
+    });
+  });
+
+  it("retries discovery readiness without approving niches twice", async () => {
+    const offerId = await createOffer(services);
+    const campaignId = await createCampaign(services, offerId);
+    const recommended = await recommendNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      campaignMutationForm(campaignId, 1),
+    );
+    expect(recommended.status).toBe("success");
+    if (recommended.status !== "success") {
+      throw new Error("Expected recommendations");
+    }
+    const review = await moveToNicheReviewSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      campaignMutationForm(campaignId, recommended.version),
+    );
+    expect(review.status).toBe("success");
+    if (review.status !== "success") {
+      throw new Error("Expected niche review");
+    }
+
+    const approve = vi.spyOn(
+      services.campaignService,
+      "approveNiches",
+    );
+    vi.spyOn(
+      services.campaignService,
+      "moveToDiscoveryReady",
+    ).mockRejectedValueOnce(new Error("TRANSIENT_DISCOVERY_FAILURE"));
+    const approveForm = campaignMutationForm(campaignId, review.version);
+    approveForm.append("nicheIds", "logistica-ar");
+
+    const failed = await approveNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      approveForm,
+    );
+
+    expect(failed).toEqual({
+      status: "error",
+      globalError:
+        "Los nichos quedaron aprobados, pero no pudimos preparar discovery. Intentá aprobarlos nuevamente.",
+    });
+    await expect(
+      services.campaignRepository.getById(
+        workspaceOne.workspaceId,
+        campaignId,
+      ),
+    ).resolves.toMatchObject({
+      state: "niche_review",
+      approvedNicheIds: ["logistica-ar"],
+      version: review.version + 1,
+    });
+
+    const retried = await approveNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      approveForm,
+    );
+
+    expect(retried).toEqual({
+      status: "success",
+      campaignId,
+      version: review.version + 2,
+    });
+    expect(approve).toHaveBeenCalledTimes(1);
   });
 
   it("generates one stable dry-run dataset and dossier", async () => {

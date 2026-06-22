@@ -14,7 +14,6 @@ import {
   approveNichesSubmission,
   createCampaignSubmission,
   generateDryRunSubmission,
-  moveToDiscoveryReadySubmission,
   moveToNicheReviewSubmission,
   recommendNichesSubmission,
 } from "./campaign-action-logic";
@@ -92,19 +91,6 @@ export async function approveNichesAction(
   const resolved = await dependencies();
   if (!resolved) return authRequiredState();
   const result = await approveNichesSubmission(resolved, formData);
-  if (result.status === "success") {
-    revalidatePath(`/campaigns/${result.campaignId}`);
-  }
-  return result;
-}
-
-export async function moveToDiscoveryReadyAction(
-  _previousState: CampaignMutationState,
-  formData: FormData,
-): Promise<CampaignMutationState> {
-  const resolved = await dependencies();
-  if (!resolved) return authRequiredState();
-  const result = await moveToDiscoveryReadySubmission(resolved, formData);
   if (result.status === "success") {
     revalidatePath(`/campaigns/${result.campaignId}`);
   }

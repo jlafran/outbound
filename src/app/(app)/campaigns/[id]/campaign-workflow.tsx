@@ -9,7 +9,6 @@ import {
 import {
   approveNichesAction,
   generateDryRunAction,
-  moveToDiscoveryReadyAction,
   moveToNicheReviewAction,
   recommendNichesAction,
 } from "@/features/campaigns/campaign-actions";
@@ -118,7 +117,9 @@ export function CampaignWorkflow({
   campaign: CampaignRecord;
   recommendations: NicheRecommendation[];
 }) {
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(
+    campaign.approvedNicheIds,
+  );
   const [recommendState, recommendAction, recommendPending] =
     useActionState(recommendNichesAction, initialActionState);
   const [reviewState, reviewAction, reviewPending] = useActionState(
@@ -127,10 +128,6 @@ export function CampaignWorkflow({
   );
   const [approveState, approveAction, approvePending] = useActionState(
     approveNichesAction,
-    initialActionState,
-  );
-  const [readyState, readyAction, readyPending] = useActionState(
-    moveToDiscoveryReadyAction,
     initialActionState,
   );
   const [generateState, generateAction, generatePending] =
@@ -167,10 +164,7 @@ export function CampaignWorkflow({
     );
   }
 
-  if (
-    campaign.state === "niche_review" &&
-    campaign.approvedNicheIds.length === 0
-  ) {
+  if (campaign.state === "niche_review") {
     return (
       <form action={approveAction} className="workflow">
         <HiddenCampaignFields campaign={campaign} />
@@ -190,27 +184,6 @@ export function CampaignWorkflow({
           </button>
         </div>
       </form>
-    );
-  }
-
-  if (campaign.state === "niche_review") {
-    return (
-      <div className="workflow">
-        <RecommendationCards
-          recommendations={recommendations.filter((recommendation) =>
-            campaign.approvedNicheIds.includes(recommendation.id),
-          )}
-          selectable={false}
-          selected={campaign.approvedNicheIds}
-        />
-        <form action={readyAction} className="workflow-actions">
-          <HiddenCampaignFields campaign={campaign} />
-          <ErrorMessage state={readyState} />
-          <button disabled={readyPending} type="submit">
-            Preparar discovery
-          </button>
-        </form>
-      </div>
     );
   }
 

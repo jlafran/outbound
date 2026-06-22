@@ -84,9 +84,14 @@ test("creates an offer and completes a campaign dry-run", async ({
   ).toBeDisabled();
   await page.getByLabel("Seleccionar Logística").check();
   await page.getByRole("button", { name: "Aprobar nichos" }).click();
-  await page.getByRole("button", { name: "Preparar discovery" }).click();
 
   await expect(page.getByText("Lista para discovery")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Preparar discovery" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Generar datos dry-run" }),
+  ).toBeVisible();
   await page
     .getByRole("button", { name: "Generar datos dry-run" })
     .click();
