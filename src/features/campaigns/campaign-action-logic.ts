@@ -117,6 +117,17 @@ function parseMutation(formData: FormData) {
   });
 }
 
+function normalizeSubmittedIds(formData: FormData): string[] {
+  const ids = formData
+    .getAll("nicheIds")
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim());
+  if (ids.length === 0 || ids.some((id) => id.length === 0)) {
+    throw new CampaignError("APPROVED_NICHE_REQUIRED");
+  }
+  return [...new Set(ids)];
+}
+
 export async function createCampaignSubmission(
   dependencies: CampaignActionDependencies,
   formData: FormData,
@@ -161,6 +172,55 @@ export async function recommendNichesSubmission(
         fieldErrors: zodFieldErrors(parsed.error),
       };
     }
+    const current =
+      await dependencies.services.campaignRepository.getById(
+        context.workspaceId,
+        parsed.data.campaignId,
+      );
+    if (!current) {
+      throw new CampaignError("CAMPAIGN_NOT_FOUND");
+    }
+    if (
+      current.state === "draft" &&
+      current.nicheRecommendationIds.length > 0
+    ) {
+      const projected =
+        await dependencies.services.nicheRecommendationProjection.get(
+          context.workspaceId,
+          parsed.data.campaignId,
+        );
+      if (projected.length === 0) {
+        if (
+          parsed.data.expectedVersion !== current.version &&
+          parsed.data.expectedVersion !== current.version - 1
+        ) {
+          throw new CampaignError("STALE_CAMPAIGN_UPDATE");
+        }
+        const recommendations =
+          await dependencies.services.campaignService.recoverNicheRecommendations(
+            context.workspaceId,
+            parsed.data.campaignId,
+          );
+        try {
+          await dependencies.services.nicheRecommendationProjection.save(
+            context.workspaceId,
+            parsed.data.campaignId,
+            recommendations,
+          );
+        } catch {
+          return {
+            status: "error",
+            globalError:
+              "Las recomendaciones quedaron guardadas, pero no pudimos mostrarlas. Intentá recomendarlas nuevamente.",
+          };
+        }
+        return {
+          status: "success",
+          campaignId: current.id,
+          version: current.version,
+        };
+      }
+    }
     const result =
       await dependencies.services.campaignService.recommendNiches(
         context.workspaceId,
@@ -168,11 +228,19 @@ export async function recommendNichesSubmission(
         context.actorId,
         parsed.data.expectedVersion,
       );
-    await dependencies.services.nicheRecommendationProjection.save(
-      context.workspaceId,
-      parsed.data.campaignId,
-      result.recommendations,
-    );
+    try {
+      await dependencies.services.nicheRecommendationProjection.save(
+        context.workspaceId,
+        parsed.data.campaignId,
+        result.recommendations,
+      );
+    } catch {
+      return {
+        status: "error",
+        globalError:
+          "Las recomendaciones quedaron guardadas, pero no pudimos mostrarlas. Intentá recomendarlas nuevamente.",
+      };
+    }
     return {
       status: "success",
       campaignId: result.campaign.id,
@@ -225,9 +293,7 @@ export async function approveNichesSubmission(
         fieldErrors: zodFieldErrors(parsed.error),
       };
     }
-    const ids = formData
-      .getAll("nicheIds")
-      .filter((value): value is string => typeof value === "string");
+    const ids = normalizeSubmittedIds(formData);
     const current =
       await dependencies.services.campaignRepository.getById(
         context.workspaceId,
@@ -236,17 +302,37 @@ export async function approveNichesSubmission(
     if (!current) {
       throw new CampaignError("CAMPAIGN_NOT_FOUND");
     }
-    const approved =
+    let approved = current;
+    if (
       current.state === "niche_review" &&
       current.approvedNicheIds.length > 0
-        ? current
-        : await dependencies.services.campaignService.approveNiches(
+    ) {
+      if (
+        parsed.data.expectedVersion !== current.version &&
+        parsed.data.expectedVersion !== current.version - 1
+      ) {
+        throw new CampaignError("STALE_CAMPAIGN_UPDATE");
+      }
+      if (
+        ids.length !== current.approvedNicheIds.length ||
+        ids.some((id, index) => id !== current.approvedNicheIds[index])
+      ) {
+        return {
+          status: "error",
+          globalError:
+            "La selección enviada no coincide con los nichos ya aprobados.",
+        };
+      }
+    } else {
+      approved =
+        await dependencies.services.campaignService.approveNiches(
             context.workspaceId,
             parsed.data.campaignId,
             ids,
             parsed.data.expectedVersion,
             context.actorId,
           );
+    }
     let campaign;
     try {
       campaign =

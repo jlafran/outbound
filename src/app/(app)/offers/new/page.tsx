@@ -12,11 +12,28 @@ function FieldError({
   errors?: Record<string, string[]>;
   name: string;
 }) {
-  return errors?.[name]?.map((error) => (
-    <p className="field-error" key={error}>
-      {error}
-    </p>
-  ));
+  const messages = errors?.[name];
+  return messages?.length ? (
+    <div id={`${name}-error`}>
+      {messages.map((error) => (
+        <p className="field-error" key={error}>
+          {error}
+        </p>
+      ))}
+    </div>
+  ) : null;
+}
+
+function fieldErrorProps(
+  errors: Record<string, string[]> | undefined,
+  name: string,
+) {
+  return errors?.[name]?.length
+    ? {
+        "aria-describedby": `${name}-error`,
+        "aria-invalid": true as const,
+      }
+    : {};
 }
 
 export default function NewOfferPage() {
@@ -41,24 +58,40 @@ export default function NewOfferPage() {
         ) : null}
         <div className="field">
           <label htmlFor="name">Nombre</label>
-          <input id="name" name="name" />
+          <input
+            {...fieldErrorProps(state.fieldErrors, "name")}
+            id="name"
+            name="name"
+          />
           <FieldError errors={state.fieldErrors} name="name" />
         </div>
         <div className="field">
           <label htmlFor="rawText">Documento de la solución</label>
-          <textarea id="rawText" name="rawText" />
+          <textarea
+            {...fieldErrorProps(state.fieldErrors, "rawText")}
+            id="rawText"
+            name="rawText"
+          />
           <FieldError errors={state.fieldErrors} name="rawText" />
         </div>
         <div className="field">
           <label htmlFor="problems">Problemas (uno por línea)</label>
-          <textarea id="problems" name="problems" />
+          <textarea
+            {...fieldErrorProps(state.fieldErrors, "problems")}
+            id="problems"
+            name="problems"
+          />
           <FieldError errors={state.fieldErrors} name="problems" />
         </div>
         <div className="field">
           <label htmlFor="expectedResults">
             Resultados esperados (uno por línea)
           </label>
-          <textarea id="expectedResults" name="expectedResults" />
+          <textarea
+            {...fieldErrorProps(state.fieldErrors, "expectedResults")}
+            id="expectedResults"
+            name="expectedResults"
+          />
           <FieldError
             errors={state.fieldErrors}
             name="expectedResults"
@@ -66,7 +99,12 @@ export default function NewOfferPage() {
         </div>
         <div className="field">
           <label htmlFor="ticketBand">Ticket objetivo</label>
-          <select defaultValue="" id="ticketBand" name="ticketBand">
+          <select
+            {...fieldErrorProps(state.fieldErrors, "ticketBand")}
+            defaultValue=""
+            id="ticketBand"
+            name="ticketBand"
+          >
             <option disabled value="">
               Seleccionar
             </option>
@@ -77,7 +115,11 @@ export default function NewOfferPage() {
         </div>
         <div className="field">
           <label htmlFor="allowedPilot">Piloto permitido</label>
-          <input id="allowedPilot" name="allowedPilot" />
+          <input
+            {...fieldErrorProps(state.fieldErrors, "allowedPilot")}
+            id="allowedPilot"
+            name="allowedPilot"
+          />
           <FieldError errors={state.fieldErrors} name="allowedPilot" />
         </div>
         <div className="field">

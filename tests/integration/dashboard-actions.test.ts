@@ -246,6 +246,116 @@ describe("dashboard action submissions", () => {
     });
   });
 
+  it("recovers a failed recommendation projection save without duplicate mutation or audit", async () => {
+    const offerId = await createOffer(services);
+    const campaignId = await createCampaign(services, offerId);
+    const save = vi.spyOn(
+      services.nicheRecommendationProjection,
+      "save",
+    );
+    save.mockRejectedValueOnce(new Error("PROJECTION_SAVE_FAILED"));
+    const recommend = vi.spyOn(
+      services.campaignService,
+      "recommendNiches",
+    );
+    const form = campaignMutationForm(campaignId, 1);
+
+    const failed = await recommendNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      form,
+    );
+
+    expect(failed).toEqual({
+      status: "error",
+      globalError:
+        "Las recomendaciones quedaron guardadas, pero no pudimos mostrarlas. Intentá recomendarlas nuevamente.",
+    });
+    await expect(
+      services.campaignRepository.getById(
+        workspaceOne.workspaceId,
+        campaignId,
+      ),
+    ).resolves.toMatchObject({
+      state: "draft",
+      version: 2,
+      nicheRecommendationIds: [
+        "logistica-ar",
+        "software-b2b-ar",
+        "salud-privada-ar",
+      ],
+    });
+
+    const retried = await recommendNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      form,
+    );
+
+    expect(retried).toEqual({
+      status: "success",
+      campaignId,
+      version: 2,
+    });
+    expect(recommend).toHaveBeenCalledTimes(1);
+    await expect(
+      services.nicheRecommendationProjection.get(
+        workspaceOne.workspaceId,
+        campaignId,
+      ),
+    ).resolves.toHaveLength(3);
+  });
+
+  it("allows recommendation projection recovery from the current display version only", async () => {
+    const offerId = await createOffer(services);
+    const campaignId = await createCampaign(services, offerId);
+    vi.spyOn(
+      services.nicheRecommendationProjection,
+      "save",
+    ).mockRejectedValueOnce(new Error("PROJECTION_SAVE_FAILED"));
+    await recommendNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      campaignMutationForm(campaignId, 1),
+    );
+
+    const recovered = await recommendNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      campaignMutationForm(campaignId, 2),
+    );
+    const campaign = await services.campaignRepository.getById(
+      workspaceOne.workspaceId,
+      campaignId,
+    );
+    if (!campaign) {
+      throw new Error("Expected campaign");
+    }
+    await services.campaignRepository.update(
+      {
+        ...campaign,
+        version: campaign.version + 1,
+        updatedAt: new Date(),
+      },
+      campaign.version,
+    );
+    vi.spyOn(
+      services.nicheRecommendationProjection,
+      "get",
+    ).mockResolvedValueOnce([]);
+    const stale = await recommendNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      campaignMutationForm(campaignId, 1),
+    );
+
+    expect(recovered).toEqual({
+      status: "success",
+      campaignId,
+      version: 2,
+    });
+    expect(stale).toEqual({
+      status: "error",
+      globalError:
+        "La campaña cambió en otra operación. Actualizá la página e intentá de nuevo.",
+    });
+  });
+
   it("rejects niche approval when no niche is selected", async () => {
     const offerId = await createOffer(services);
     const campaignId = await createCampaign(services, offerId);
@@ -384,6 +494,100 @@ describe("dashboard action submissions", () => {
       version: review.version + 2,
     });
     expect(approve).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects approval recovery when the submitted selection changed", async () => {
+    const offerId = await createOffer(services);
+    const campaignId = await createCampaign(services, offerId);
+    const recommended = await recommendNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      campaignMutationForm(campaignId, 1),
+    );
+    if (recommended.status !== "success") {
+      throw new Error("Expected recommendations");
+    }
+    const review = await moveToNicheReviewSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      campaignMutationForm(campaignId, recommended.version),
+    );
+    if (review.status !== "success") {
+      throw new Error("Expected niche review");
+    }
+    vi.spyOn(
+      services.campaignService,
+      "moveToDiscoveryReady",
+    ).mockRejectedValueOnce(new Error("TRANSIENT_DISCOVERY_FAILURE"));
+    const original = campaignMutationForm(campaignId, review.version);
+    original.append("nicheIds", "logistica-ar");
+    await approveNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      original,
+    );
+    const changed = campaignMutationForm(campaignId, review.version);
+    changed.append("nicheIds", "software-b2b-ar");
+
+    const result = await approveNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      changed,
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      globalError:
+        "La selección enviada no coincide con los nichos ya aprobados.",
+    });
+    await expect(
+      services.campaignRepository.getById(
+        workspaceOne.workspaceId,
+        campaignId,
+      ),
+    ).resolves.toMatchObject({
+      state: "niche_review",
+      approvedNicheIds: ["logistica-ar"],
+      version: review.version + 1,
+    });
+  });
+
+  it("rejects approval recovery from an unrelated older version", async () => {
+    const offerId = await createOffer(services);
+    const campaignId = await createCampaign(services, offerId);
+    const recommended = await recommendNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      campaignMutationForm(campaignId, 1),
+    );
+    if (recommended.status !== "success") {
+      throw new Error("Expected recommendations");
+    }
+    const review = await moveToNicheReviewSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      campaignMutationForm(campaignId, recommended.version),
+    );
+    if (review.status !== "success") {
+      throw new Error("Expected niche review");
+    }
+    vi.spyOn(
+      services.campaignService,
+      "moveToDiscoveryReady",
+    ).mockRejectedValueOnce(new Error("TRANSIENT_DISCOVERY_FAILURE"));
+    const original = campaignMutationForm(campaignId, review.version);
+    original.append("nicheIds", "logistica-ar");
+    await approveNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      original,
+    );
+    const replay = campaignMutationForm(campaignId, review.version - 1);
+    replay.append("nicheIds", "logistica-ar");
+
+    const result = await approveNichesSubmission(
+      { services, resolveContext: resolveContext(workspaceOne) },
+      replay,
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      globalError:
+        "La campaña cambió en otra operación. Actualizá la página e intentá de nuevo.",
+    });
   });
 
   it("generates one stable dry-run dataset and dossier", async () => {

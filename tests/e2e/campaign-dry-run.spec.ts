@@ -20,6 +20,17 @@ test("validates the offer form and shows the simulation banner", async ({
   await page.getByRole("button", { name: "Guardar oferta" }).click();
 
   await expect(page.getByText("Ingresá un nombre")).toBeVisible();
+  await expect(page.getByLabel("Nombre")).toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+  await expect(page.getByLabel("Nombre")).toHaveAttribute(
+    "aria-describedby",
+    "name-error",
+  );
+  await expect(page.locator("#name-error")).toContainText(
+    "Ingresá un nombre",
+  );
   await expect(
     page.getByText("Describí la solución con al menos 20 caracteres"),
   ).toBeVisible();
@@ -60,6 +71,22 @@ test("creates an offer and completes a campaign dry-run", async ({
   await expect(page.getByText("Consultas repetitivas")).toBeVisible();
 
   await page.getByRole("link", { name: "Crear campaña" }).click();
+  await page.getByRole("button", { name: "Guardar campaña" }).click();
+  await expect(page.getByLabel("Nombre de campaña")).toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+  await expect(page.getByLabel("Nombre de campaña")).toHaveAttribute(
+    "aria-describedby",
+    "name-error",
+  );
+  await expect(page.locator("#name-error")).toContainText(
+    "Ingresá un nombre de campaña",
+  );
+  await expect(page.getByLabel("Emails diarios")).toHaveAttribute(
+    "aria-describedby",
+    "targetDailyEmails-error",
+  );
   await page
     .getByLabel("Nombre de campaña")
     .fill("Argentina operaciones");
@@ -104,6 +131,21 @@ test("creates an offer and completes a campaign dry-run", async ({
     companies.getByRole("listitem").first(),
   ).toContainText("Logística Pampa");
   await expect(
-    page.getByRole("link", { name: "Ver dossier de Logística Pampa" }),
+    page.getByRole("link", { name: "Ver estado del dossier" }),
   ).toHaveAttribute("href", /\/dossiers\/.+/);
+  await page.getByRole("link", { name: "Ver estado del dossier" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Dossier disponible" }),
+  ).toBeVisible();
+  await expect(page.getByText(/^ID: /)).toBeVisible();
+  await expect(page.getByText("Estado: generado")).toBeVisible();
+  await expect(page.getByText("Versión: 1")).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: /editar|guardar|exportar|descargar/i,
+    }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: /editar|exportar|descargar/i }),
+  ).toHaveCount(0);
 });

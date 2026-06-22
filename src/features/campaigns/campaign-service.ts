@@ -111,30 +111,10 @@ export class CampaignService {
     );
     this.requireExpectedVersion(campaign, expectedVersion);
     this.requireState(campaign, "draft");
-    const offer = await this.offerRepository.getById(
+    const recommendations = await this.generateNicheRecommendations(
       workspaceId,
       campaign.offerId,
     );
-
-    if (!offer) {
-      throw new CampaignError("OFFER_REQUIRED");
-    }
-
-    const recommendationResult =
-      rankedNicheRecommendationListSchema.safeParse(
-        await this.nicheAdvisor.recommend(
-          normalizedOfferSchema.parse(offer),
-        ),
-      );
-    if (!recommendationResult.success) {
-      throw new CampaignError("INVALID_NICHE_RECOMMENDATIONS", {
-        cause: recommendationResult.error,
-      });
-    }
-    const recommendations = recommendationResult.data;
-    if (!areNicheRecommendationsSafe(offer, recommendations)) {
-      throw new CampaignError("UNSAFE_NICHE_RECOMMENDATION");
-    }
     const recommendationIds = recommendations.map(({ id }) => id);
 
     const updated = await this.unitOfWork.run(
@@ -176,6 +156,31 @@ export class CampaignService {
       campaign: updated,
       recommendations: structuredClone(recommendations),
     };
+  }
+
+  async recoverNicheRecommendations(
+    workspaceId: string,
+    campaignId: string,
+  ): Promise<NicheRecommendation[]> {
+    const campaign = await this.requireCampaign(workspaceId, campaignId);
+    this.requireState(campaign, "draft");
+    if (campaign.nicheRecommendationIds.length === 0) {
+      throw new CampaignError("NICHE_RECOMMENDATIONS_REQUIRED");
+    }
+    const recommendations = await this.generateNicheRecommendations(
+      workspaceId,
+      campaign.offerId,
+    );
+    const recommendationIds = recommendations.map(({ id }) => id);
+    if (
+      recommendationIds.length !== campaign.nicheRecommendationIds.length ||
+      recommendationIds.some(
+        (id, index) => id !== campaign.nicheRecommendationIds[index],
+      )
+    ) {
+      throw new CampaignError("INVALID_NICHE_RECOMMENDATIONS");
+    }
+    return structuredClone(recommendations);
   }
 
   async moveToNicheReview(
@@ -293,6 +298,34 @@ export class CampaignService {
     }
 
     return campaign;
+  }
+
+  private async generateNicheRecommendations(
+    workspaceId: string,
+    offerId: string,
+  ): Promise<NicheRecommendation[]> {
+    const offer = await this.offerRepository.getById(workspaceId, offerId);
+
+    if (!offer) {
+      throw new CampaignError("OFFER_REQUIRED");
+    }
+
+    const recommendationResult =
+      rankedNicheRecommendationListSchema.safeParse(
+        await this.nicheAdvisor.recommend(
+          normalizedOfferSchema.parse(offer),
+        ),
+      );
+    if (!recommendationResult.success) {
+      throw new CampaignError("INVALID_NICHE_RECOMMENDATIONS", {
+        cause: recommendationResult.error,
+      });
+    }
+    const recommendations = recommendationResult.data;
+    if (!areNicheRecommendationsSafe(offer, recommendations)) {
+      throw new CampaignError("UNSAFE_NICHE_RECOMMENDATION");
+    }
+    return recommendations;
   }
 
   private requireState(

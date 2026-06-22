@@ -257,6 +257,72 @@ describe("CampaignService niche recommendations", () => {
     ]);
   });
 
+  it("recovers validated recommendations without mutation or audit", async () => {
+    const { service, unitOfWork } = await createCampaignHarness();
+    const campaign = await service.create(campaignInput);
+    const recommended = await service.recommendNiches(
+      campaign.workspaceId,
+      campaign.id,
+      "user-1",
+      campaign.version,
+    );
+    const eventsBefore = await unitOfWork.auditRepository.list(
+      campaign.workspaceId,
+    );
+    expect(eventsBefore).toHaveLength(1);
+
+    const recovered = await service.recoverNicheRecommendations(
+      campaign.workspaceId,
+      campaign.id,
+    );
+
+    expect(recovered).toEqual(recommended.recommendations);
+    expect(
+      await unitOfWork.campaignRepository.getById(
+        campaign.workspaceId,
+        campaign.id,
+      ),
+    ).toEqual(recommended.campaign);
+    expect(
+      await unitOfWork.auditRepository.list(campaign.workspaceId),
+    ).toEqual(eventsBefore);
+  });
+
+  it("rejects recovery when regenerated IDs differ from stored IDs", async () => {
+    const fakeAdvisor = new FakeNicheAdvisor();
+    let call = 0;
+    const advisor: NicheAdvisor = {
+      async recommend(offer) {
+        const recommendations = await fakeAdvisor.recommend(offer);
+        call += 1;
+        if (call === 2) {
+          recommendations[0] = {
+            ...recommendations[0],
+            id: "different-niche-ar",
+          };
+        }
+        return recommendations;
+      },
+    };
+    const { service } = await createCampaignHarness({}, advisor);
+    const campaign = await service.create(campaignInput);
+    await service.recommendNiches(
+      campaign.workspaceId,
+      campaign.id,
+      "user-1",
+      campaign.version,
+    );
+
+    await expect(
+      service.recoverNicheRecommendations(
+        campaign.workspaceId,
+        campaign.id,
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining({ code: "INVALID_NICHE_RECOMMENDATIONS" }),
+    );
+  });
+
   it("rejects invalid advisor output", async () => {
     const recommendations = await new FakeNicheAdvisor().recommend(
       normalizedOffer,

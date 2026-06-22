@@ -12,11 +12,28 @@ function FieldError({
   errors?: Record<string, string[]>;
   name: string;
 }) {
-  return errors?.[name]?.map((error) => (
-    <p className="field-error" key={error}>
-      {error}
-    </p>
-  ));
+  const messages = errors?.[name];
+  return messages?.length ? (
+    <div id={`${name}-error`}>
+      {messages.map((error) => (
+        <p className="field-error" key={error}>
+          {error}
+        </p>
+      ))}
+    </div>
+  ) : null;
+}
+
+function fieldErrorProps(
+  errors: Record<string, string[]> | undefined,
+  name: string,
+) {
+  return errors?.[name]?.length
+    ? {
+        "aria-describedby": `${name}-error`,
+        "aria-invalid": true as const,
+      }
+    : {};
 }
 
 export function CampaignForm({ offerId }: { offerId: string }) {
@@ -35,7 +52,11 @@ export function CampaignForm({ offerId }: { offerId: string }) {
       ) : null}
       <div className="field">
         <label htmlFor="name">Nombre de campaña</label>
-        <input id="name" name="name" />
+        <input
+          {...fieldErrorProps(state.fieldErrors, "name")}
+          id="name"
+          name="name"
+        />
         <FieldError errors={state.fieldErrors} name="name" />
       </div>
       <div className="field">
@@ -45,6 +66,10 @@ export function CampaignForm({ offerId }: { offerId: string }) {
           inputMode="numeric"
           name="targetDailyEmails"
           type="number"
+          {...fieldErrorProps(
+            state.fieldErrors,
+            "targetDailyEmails",
+          )}
         />
         <FieldError
           errors={state.fieldErrors}
@@ -54,6 +79,7 @@ export function CampaignForm({ offerId }: { offerId: string }) {
       <div className="field">
         <label htmlFor="paidDataMode">Modo de datos</label>
         <select
+          {...fieldErrorProps(state.fieldErrors, "paidDataMode")}
           defaultValue="free"
           id="paidDataMode"
           name="paidDataMode"

@@ -64,7 +64,7 @@ export default async function CampaignPage({
                   <>
                     <br />
                     <Link href={`/dossiers/${generated.dossierId}`}>
-                      Ver dossier de {company.name}
+                      Ver estado del dossier
                     </Link>
                   </>
                 ) : null}
