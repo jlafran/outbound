@@ -11,17 +11,14 @@ export async function GET(
   const pdfDossierHandler = createPdfDossierHandler({
     ...(isE2E
       ? await (async () => {
-          const [
-            { createMemoryAuditRepository },
-            { getAppServices },
-          ] = await Promise.all([
-            import("@/features/audit/audit-repository"),
-            import("@/features/app/app-services"),
-          ]);
-          const { dossierRepository } = await getAppServices();
+          const { getAppServices } = await import(
+            "@/features/app/app-services"
+          );
+          const { dossierRepository, auditRepository } =
+            await getAppServices();
           return {
             dossierRepository,
-            auditRepository: createMemoryAuditRepository(),
+            auditRepository,
           };
         })()
       : await (async () => {

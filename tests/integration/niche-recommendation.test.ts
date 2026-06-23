@@ -245,6 +245,10 @@ describe("CampaignService niche recommendations", () => {
     expect(
       await unitOfWork.auditRepository.list(campaign.workspaceId),
     ).toEqual([
+      expect.objectContaining({
+        action: "campaign.created",
+        entityId: campaign.id,
+      }),
       {
         workspaceId: campaign.workspaceId,
         actorId: "user-1",
@@ -327,7 +331,7 @@ describe("CampaignService niche recommendations", () => {
     const eventsBefore = await unitOfWork.auditRepository.list(
       campaign.workspaceId,
     );
-    expect(eventsBefore).toHaveLength(1);
+    expect(eventsBefore).toHaveLength(2);
 
     const recovered = await service.recoverNicheRecommendations(
       campaign.workspaceId,
@@ -671,8 +675,8 @@ describe("CampaignService niche recommendations", () => {
     const events = await unitOfWork.auditRepository.list(
       campaign.workspaceId,
     );
-    expect(events).toHaveLength(2);
-    expect(events[1]).toEqual({
+    expect(events).toHaveLength(3);
+    expect(events[2]).toEqual({
       workspaceId: campaign.workspaceId,
       actorId: "user-1",
       action: "niches.approved",
@@ -687,8 +691,8 @@ describe("CampaignService niche recommendations", () => {
   it("rolls back a failed audit append and retries without duplicates", async () => {
     let failurePending = true;
     const { service, unitOfWork } = await createCampaignHarness({
-      beforeAuditAppend() {
-        if (failurePending) {
+      beforeAuditAppend(input) {
+        if (input.action === "niches.recommended" && failurePending) {
           failurePending = false;
           throw new Error("audit append failed");
         }
@@ -712,7 +716,12 @@ describe("CampaignService niche recommendations", () => {
     ).toEqual(campaign);
     expect(
       await unitOfWork.auditRepository.list(campaign.workspaceId),
-    ).toEqual([]);
+    ).toEqual([
+      expect.objectContaining({
+        action: "campaign.created",
+        entityId: campaign.id,
+      }),
+    ]);
 
     const retried = await service.recommendNiches(
       campaign.workspaceId,
@@ -724,7 +733,7 @@ describe("CampaignService niche recommendations", () => {
     expect(retried.campaign.version).toBe(campaign.version + 1);
     expect(
       await unitOfWork.auditRepository.list(campaign.workspaceId),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
 
   it("serializes concurrent audited operations without losing data", async () => {
@@ -738,8 +747,8 @@ describe("CampaignService niche recommendations", () => {
       releaseFirstAppend = resolve;
     });
     const { service, unitOfWork } = await createCampaignHarness({
-      async beforeAuditAppend() {
-        if (firstAppend) {
+      async beforeAuditAppend(input) {
+        if (input.action === "niches.recommended" && firstAppend) {
           firstAppend = false;
           signalFirstAppend();
           await firstAppendRelease;
@@ -786,6 +795,6 @@ describe("CampaignService niche recommendations", () => {
     ).toEqual(second.campaign);
     expect(
       await unitOfWork.auditRepository.list("workspace-1"),
-    ).toHaveLength(2);
+    ).toHaveLength(4);
   });
 });

@@ -274,6 +274,7 @@ export async function moveToNicheReviewSubmission(
         context.workspaceId,
         parsed.data.campaignId,
         parsed.data.expectedVersion,
+        context.actorId,
       );
     return {
       status: "success",
@@ -345,6 +346,7 @@ export async function approveNichesSubmission(
           context.workspaceId,
           parsed.data.campaignId,
           approved.version,
+          context.actorId,
         );
     } catch {
       return {

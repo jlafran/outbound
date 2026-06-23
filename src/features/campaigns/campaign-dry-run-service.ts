@@ -7,6 +7,7 @@ import type {
 import type { DossierService } from "@/features/dossiers/dossier-service";
 import type { DossierRepository } from "@/features/dossiers/dossier-repository";
 import type { ResearchProvider } from "@/features/research/research-provider";
+import type { AuditRepository } from "@/features/audit/audit-repository";
 
 export class CampaignDryRunService {
   constructor(
@@ -15,6 +16,7 @@ export class CampaignDryRunService {
     private readonly dossierService: DossierService,
     private readonly dossierRepository: DossierRepository,
     private readonly projection: CampaignDryRunProjection,
+    private readonly auditRepository: AuditRepository,
   ) {}
 
   async generate(input: {
@@ -54,6 +56,21 @@ export class CampaignDryRunService {
         const highest = companies[0];
         if (!highest) {
           throw new Error("DRY_RUN_COMPANIES_REQUIRED");
+        }
+
+        for (const company of companies) {
+          await this.auditRepository.append({
+            workspaceId: input.workspaceId,
+            actorId: input.actorId,
+            action: "company.scored",
+            entityId: company.campaignCompanyId,
+            metadata: {
+              campaignId: input.campaignId,
+              companyId: company.companyId,
+              domain: company.domain,
+              score: company.score.total,
+            },
+          });
         }
 
         await this.projection.stageCompanies(

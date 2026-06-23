@@ -692,6 +692,23 @@ describe("dashboard action submissions", () => {
       campaignCompanyId: first.companies[0]?.campaignCompanyId,
       version: 1,
     });
+    const scoreEvents = (
+      await services.auditRepository.list(workspaceOne.workspaceId)
+    ).filter((event) => event.action === "company.scored");
+    const transitionEvents = (
+      await services.auditRepository.list(workspaceOne.workspaceId)
+    ).filter((event) => event.action === "campaign.transitioned");
+    expect(transitionEvents.map((event) => event.metadata)).toEqual([
+      expect.objectContaining({ from: "draft", to: "niche_review" }),
+      expect.objectContaining({
+        from: "niche_review",
+        to: "discovery_ready",
+      }),
+    ]);
+    expect(scoreEvents).toHaveLength(3);
+    expect(scoreEvents.map((event) => event.entityId)).toEqual(
+      first.companies.map((company) => company.campaignCompanyId),
+    );
   });
 
   it("adds a recommendation as a new immutable dossier version", async () => {

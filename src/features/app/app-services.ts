@@ -1,4 +1,8 @@
 import {
+  createDrizzleAuditRepository,
+  type AuditRepository,
+} from "@/features/audit/audit-repository";
+import {
   CampaignDryRunService,
 } from "@/features/campaigns/campaign-dry-run-service";
 import {
@@ -73,6 +77,7 @@ export interface AppServices {
   companyRepository: CompanyRepository;
   dossierService: DossierService;
   dossierRepository: DossierRepository;
+  auditRepository: AuditRepository;
 }
 
 function toDossierSource(company: ResearchCompany): DossierSourceMaterial {
@@ -201,6 +206,7 @@ function composeServices(input: {
   companyRepository: CompanyRepository;
   dossierService: DossierService;
   dossierRepository: DossierRepository;
+  auditRepository: AuditRepository;
   nicheRecommendationProjection: NicheRecommendationProjection;
   campaignDryRunProjection: CampaignDryRunProjection;
   researchProvider: ResearchProvider;
@@ -213,6 +219,7 @@ function composeServices(input: {
       input.dossierService,
       input.dossierRepository,
       input.campaignDryRunProjection,
+      input.auditRepository,
     ),
   };
 }
@@ -246,6 +253,7 @@ export function createMemoryAppServices(): AppServices {
     companyRepository,
     dossierService,
     dossierRepository: dossierUnitOfWork.dossierRepository,
+    auditRepository: campaignUnitOfWork.auditRepository,
     nicheRecommendationProjection,
     campaignDryRunProjection,
     researchProvider: new FakeResearchProvider(companyRepository),
@@ -267,6 +275,7 @@ async function createProductionAppServices(): Promise<AppServices> {
   const dossierRepository = createDrizzleDossierRepository(
     createDrizzleDossierPersistenceExecutor(db),
   );
+  const auditRepository = createDrizzleAuditRepository(db);
   const researchRepository = createDrizzleResearchRepository(db);
   const nicheAdvisor = new FakeNicheAdvisor();
   const nicheRecommendationProjection =
@@ -297,6 +306,7 @@ async function createProductionAppServices(): Promise<AppServices> {
     companyRepository,
     dossierService,
     dossierRepository,
+    auditRepository,
     nicheRecommendationProjection,
     campaignDryRunProjection,
     researchProvider: new FakeResearchProvider(

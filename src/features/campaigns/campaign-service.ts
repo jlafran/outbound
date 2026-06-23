@@ -60,16 +60,36 @@ export class CampaignService {
     }
 
     const now = new Date();
-    return this.campaignRepository.create({
+    const record = {
       id: crypto.randomUUID(),
       ...parsed,
-      state: "draft",
+      state: "draft" as const,
       nicheRecommendationIds: [],
       approvedNicheIds: [],
       version: 1,
       createdAt: now,
       updatedAt: now,
-    });
+    };
+
+    return this.unitOfWork.run(
+      async ({ campaignRepository, auditRepository }) => {
+        const created = await campaignRepository.create(record);
+        await auditRepository.append({
+          workspaceId: parsed.workspaceId,
+          actorId: parsed.createdBy,
+          action: "campaign.created",
+          entityId: created.id,
+          metadata: {
+            offerId: parsed.offerId,
+            paidDataMode: parsed.paidDataMode,
+            targetDailyEmails: parsed.targetDailyEmails,
+            targetTicketBand: parsed.targetTicketBand,
+          },
+        });
+
+        return created;
+      },
+    );
   }
 
   async recordNicheRecommendations(
@@ -186,6 +206,7 @@ export class CampaignService {
     workspaceId: string,
     campaignId: string,
     expectedVersion: number,
+    actorId?: string,
   ): Promise<CampaignRecord> {
     const campaign = await this.requireCampaign(workspaceId, campaignId);
 
@@ -195,14 +216,33 @@ export class CampaignService {
       throw new CampaignError("NICHE_RECOMMENDATIONS_REQUIRED");
     }
 
-    return this.campaignRepository.update(
-      {
-        ...campaign,
-        state: "niche_review",
-        version: expectedVersion + 1,
-        updatedAt: new Date(),
+    return this.unitOfWork.run(
+      async ({ campaignRepository, auditRepository }) => {
+        const updated = await campaignRepository.update(
+          {
+            ...campaign,
+            state: "niche_review",
+            version: expectedVersion + 1,
+            updatedAt: new Date(),
+          },
+          expectedVersion,
+        );
+        if (actorId) {
+          await auditRepository.append({
+            workspaceId,
+            actorId,
+            action: "campaign.transitioned",
+            entityId: campaignId,
+            metadata: {
+              from: "draft",
+              to: "niche_review",
+              expectedVersion,
+            },
+          });
+        }
+
+        return updated;
       },
-      expectedVersion,
     );
   }
 
@@ -265,6 +305,7 @@ export class CampaignService {
     workspaceId: string,
     campaignId: string,
     expectedVersion: number,
+    actorId?: string,
   ): Promise<CampaignRecord> {
     const campaign = await this.requireCampaign(workspaceId, campaignId);
     this.requireExpectedVersion(campaign, expectedVersion);
@@ -274,14 +315,33 @@ export class CampaignService {
       throw new CampaignError("APPROVED_NICHE_REQUIRED");
     }
 
-    return this.campaignRepository.update(
-      {
-        ...campaign,
-        state: "discovery_ready",
-        version: expectedVersion + 1,
-        updatedAt: new Date(),
+    return this.unitOfWork.run(
+      async ({ campaignRepository, auditRepository }) => {
+        const updated = await campaignRepository.update(
+          {
+            ...campaign,
+            state: "discovery_ready",
+            version: expectedVersion + 1,
+            updatedAt: new Date(),
+          },
+          expectedVersion,
+        );
+        if (actorId) {
+          await auditRepository.append({
+            workspaceId,
+            actorId,
+            action: "campaign.transitioned",
+            entityId: campaignId,
+            metadata: {
+              from: "niche_review",
+              to: "discovery_ready",
+              expectedVersion,
+            },
+          });
+        }
+
+        return updated;
       },
-      expectedVersion,
     );
   }
 
