@@ -1,5 +1,7 @@
 import type { NicheRecommendation } from "@/features/niches/niche-schema";
 import type { ResearchCompany } from "@/features/research/research-provider";
+import type { ResearchRepository } from "@/features/research/research-repository";
+import type { DossierRepository } from "@/features/dossiers/dossier-repository";
 
 export interface NicheRecommendationProjection {
   get(
@@ -135,6 +137,52 @@ export function createMemoryCampaignDryRunProjection(): CampaignDryRunProjection
           structuredClone(company),
         );
       }
+    },
+  };
+}
+
+export function createResearchCampaignDryRunProjection(
+  researchRepository: ResearchRepository,
+  dossierRepository: DossierRepository,
+): CampaignDryRunProjection {
+  return {
+    async get(workspaceId, campaignId) {
+      const companies =
+        await researchRepository.listCampaignCompaniesMaterial({
+          workspaceId,
+          campaignId,
+        });
+      const highest = companies[0];
+      if (!highest) {
+        return null;
+      }
+      const dossier = await dossierRepository.getLatest(
+        workspaceId,
+        highest.campaignCompanyId,
+      );
+      if (!dossier) {
+        return null;
+      }
+
+      return {
+        campaignId,
+        companies,
+        dossierId: dossier.id,
+      };
+    },
+    async getOrCreate(workspaceId, campaignId, create) {
+      return (await this.get(workspaceId, campaignId)) ?? create();
+    },
+    async getCompany(workspaceId, campaignCompanyId) {
+      return researchRepository.getCampaignCompanyMaterial({
+        workspaceId,
+        campaignCompanyId,
+      });
+    },
+    async stageCompanies() {
+      // Durable research providers persist companies before this projection is
+      // asked to expose them. This method exists to satisfy the shared dry-run
+      // service contract used by the in-memory E2E path.
     },
   };
 }

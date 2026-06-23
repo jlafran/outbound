@@ -44,6 +44,7 @@ export class CampaignDryRunService {
         const result = await this.researchProvider.researchCampaign({
           workspaceId: input.workspaceId,
           campaignId: input.campaignId,
+          offerId: campaign.offerId,
         });
         const companies = [...result.companies].sort(
           (left, right) =>

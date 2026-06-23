@@ -43,6 +43,10 @@ export type CampaignCompanyIdentity = {
 
 export interface ResearchRepository {
   persistCampaignResearch(input: PersistCampaignResearchInput): Promise<void>;
+  listCampaignCompaniesMaterial(input: {
+    workspaceId: string;
+    campaignId: string;
+  }): Promise<CampaignCompanyMaterial[]>;
   getCampaignCompanyMaterial(
     identity: CampaignCompanyIdentity,
   ): Promise<CampaignCompanyMaterial | null>;
@@ -262,6 +266,36 @@ export function createDrizzleResearchRepository(
             });
         }
       }
+    },
+    async listCampaignCompaniesMaterial({ workspaceId, campaignId }) {
+      const rows = await database
+        .select()
+        .from(campaignCompanies)
+        .where(
+          and(
+            eq(campaignCompanies.workspaceId, workspaceId),
+            eq(campaignCompanies.campaignId, campaignId),
+          ),
+        )
+        .orderBy(asc(campaignCompanies.id));
+      const materials = await Promise.all(
+        rows.map((row) =>
+          this.getCampaignCompanyMaterial({
+            workspaceId,
+            campaignCompanyId: row.id,
+          }),
+        ),
+      );
+
+      return materials
+        .filter((material): material is CampaignCompanyMaterial =>
+          Boolean(material),
+        )
+        .sort(
+          (left, right) =>
+            right.score.total - left.score.total ||
+            left.domain.localeCompare(right.domain),
+        );
     },
     async getCampaignCompanyMaterial({ workspaceId, campaignCompanyId }) {
       const [campaignCompany] = await database
@@ -500,6 +534,32 @@ export function createMemoryResearchRepository(): ResearchRepository {
           );
         }
       }
+    },
+    async listCampaignCompaniesMaterial({ workspaceId, campaignId }) {
+      const rows = [...campaignCompanies.values()]
+        .filter(
+          (record) =>
+            record.workspaceId === workspaceId &&
+            record.campaignId === campaignId,
+        )
+        .sort(
+          (left, right) =>
+            right.scoreTotal - left.scoreTotal ||
+            left.domain.localeCompare(right.domain),
+        );
+      const materials = await Promise.all(
+        rows.map((record) =>
+          this.getCampaignCompanyMaterial({
+            workspaceId,
+            campaignCompanyId: record.id,
+          }),
+        ),
+      );
+
+      return materials.filter(
+        (material): material is CampaignCompanyMaterial =>
+          Boolean(material),
+      );
     },
     async getCampaignCompanyMaterial({ workspaceId, campaignCompanyId }) {
       const campaignCompany = campaignCompanies.get(campaignCompanyId);

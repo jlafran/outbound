@@ -4,8 +4,7 @@ import {
 import {
   createMemoryCampaignDryRunProjection,
   createMemoryNicheRecommendationProjection,
-  createUnsupportedCampaignDryRunProjection,
-  createUnsupportedNicheRecommendationProjection,
+  createResearchCampaignDryRunProjection,
   type CampaignDryRunProjection,
   type NicheRecommendationProjection,
 } from "@/features/campaigns/campaign-projections";
@@ -42,10 +41,12 @@ import {
 } from "@/features/dossiers/dossier-unit-of-work";
 import { FakeNicheAdvisor } from "@/features/niches/fake-niche-advisor";
 import type { NicheAdvisor } from "@/features/niches/niche-advisor";
+import { rankedNicheRecommendationListSchema } from "@/features/niches/niche-schema";
 import {
   createDrizzleOfferRepository,
   type OfferRepository,
 } from "@/features/offers/offer-repository";
+import { normalizedOfferSchema } from "@/features/offers/offer-schema";
 import { OfferService } from "@/features/offers/offer-service";
 import {
   createDrizzleOfferUnitOfWork,
@@ -56,6 +57,10 @@ import type {
   ResearchCompany,
   ResearchProvider,
 } from "@/features/research/research-provider";
+import {
+  createDrizzleResearchRepository,
+  type ResearchRepository,
+} from "@/features/research/research-repository";
 
 export interface AppServices {
   offerService: OfferService;
@@ -128,6 +133,66 @@ function createProjectionSourceReader(
   };
 }
 
+function createResearchSourceReader(
+  researchRepository: ResearchRepository,
+): DossierSourceReader {
+  return {
+    async read({ workspaceId, campaignCompanyId }) {
+      const company =
+        await researchRepository.getCampaignCompanyMaterial({
+          workspaceId,
+          campaignCompanyId,
+        });
+      if (!company) {
+        throw new Error("DOSSIER_SOURCE_NOT_FOUND");
+      }
+      return toDossierSource(company);
+    },
+  };
+}
+
+function createRegeneratingNicheRecommendationProjection(input: {
+  campaignRepository: CampaignRepository;
+  offerRepository: OfferRepository;
+  nicheAdvisor: NicheAdvisor;
+}): NicheRecommendationProjection {
+  return {
+    async get(workspaceId, campaignId) {
+      const campaign = await input.campaignRepository.getById(
+        workspaceId,
+        campaignId,
+      );
+      if (!campaign || campaign.nicheRecommendationIds.length === 0) {
+        return [];
+      }
+      const offer = await input.offerRepository.getById(
+        workspaceId,
+        campaign.offerId,
+      );
+      if (!offer) {
+        return [];
+      }
+      const effectiveOffer = normalizedOfferSchema.parse({
+        ...offer,
+        ticketBand: campaign.targetTicketBand,
+      });
+      const recommendations = rankedNicheRecommendationListSchema.parse(
+        await input.nicheAdvisor.recommend(effectiveOffer),
+      );
+      const selectedIds = new Set(campaign.nicheRecommendationIds);
+
+      return recommendations.filter((recommendation) =>
+        selectedIds.has(recommendation.id),
+      );
+    },
+    async save() {
+      // The campaign row is the durable source of truth for recommendation ids.
+      // Recommendations are deterministic in Phase 1, so they can be regenerated
+      // from the persisted offer + campaign ticket band whenever the page loads.
+    },
+  };
+}
+
 function composeServices(input: {
   offerService: OfferService;
   offerRepository: OfferRepository;
@@ -187,35 +252,6 @@ export function createMemoryAppServices(): AppServices {
   });
 }
 
-class UnsupportedNicheAdvisor implements NicheAdvisor {
-  async recommend(): Promise<never> {
-    throw new Error("NICHE_ADVISOR_NOT_CONFIGURED");
-  }
-}
-
-class UnsupportedResearchProvider implements ResearchProvider {
-  async researchCampaign(): Promise<never> {
-    throw new Error("DRY_RUN_RESEARCH_E2E_ONLY");
-  }
-}
-
-const unsupportedDossierSourceReader: DossierSourceReader = {
-  async read() {
-    throw new Error("DOSSIER_SOURCE_READER_NOT_CONFIGURED");
-  },
-};
-
-export function createProductionProjections(): {
-  nicheRecommendationProjection: NicheRecommendationProjection;
-  campaignDryRunProjection: CampaignDryRunProjection;
-} {
-  return {
-    nicheRecommendationProjection:
-      createUnsupportedNicheRecommendationProjection(),
-    campaignDryRunProjection: createUnsupportedCampaignDryRunProjection(),
-  };
-}
-
 async function createProductionAppServices(): Promise<AppServices> {
   const { db } = await import("@/db/client");
   const offerUnitOfWork = createDrizzleOfferUnitOfWork(db);
@@ -231,13 +267,21 @@ async function createProductionAppServices(): Promise<AppServices> {
   const dossierRepository = createDrizzleDossierRepository(
     createDrizzleDossierPersistenceExecutor(db),
   );
-  const {
-    nicheRecommendationProjection,
-    campaignDryRunProjection,
-  } = createProductionProjections();
+  const researchRepository = createDrizzleResearchRepository(db);
+  const nicheAdvisor = new FakeNicheAdvisor();
+  const nicheRecommendationProjection =
+    createRegeneratingNicheRecommendationProjection({
+      campaignRepository,
+      offerRepository,
+      nicheAdvisor,
+    });
+  const campaignDryRunProjection = createResearchCampaignDryRunProjection(
+    researchRepository,
+    dossierRepository,
+  );
   const dossierService = new DossierService(
     dossierUnitOfWork,
-    unsupportedDossierSourceReader,
+    createResearchSourceReader(researchRepository),
   );
 
   return composeServices({
@@ -246,7 +290,7 @@ async function createProductionAppServices(): Promise<AppServices> {
     campaignService: new CampaignService(
       campaignRepository,
       offerRepository,
-      new UnsupportedNicheAdvisor(),
+      nicheAdvisor,
       campaignUnitOfWork,
     ),
     campaignRepository,
@@ -255,7 +299,10 @@ async function createProductionAppServices(): Promise<AppServices> {
     dossierRepository,
     nicheRecommendationProjection,
     campaignDryRunProjection,
-    researchProvider: new UnsupportedResearchProvider(),
+    researchProvider: new FakeResearchProvider(
+      companyRepository,
+      researchRepository,
+    ),
   });
 }
 
