@@ -17,6 +17,7 @@ import {
 } from "@/features/companies/company-schema";
 import {
   campaignCompanies,
+  companyContacts,
   companies,
   evidence,
   offerOpportunities,
@@ -490,6 +491,60 @@ describe("company and research database schemas", () => {
       "qualified",
       "discarded",
     ]);
+    expect(campaignCompanies.scoreTotal.notNull).toBe(false);
+    expect(campaignCompanies.scoreSnapshot.notNull).toBe(false);
+  });
+
+  it("keeps contacts tenant-safe and unique per company email", () => {
+    const config = getTableConfig(companyContacts);
+    const companyForeignKey = config.foreignKeys
+      .map((foreignKey) => foreignKey.reference())
+      .find(
+        (reference) =>
+          columnNames(reference.columns).join(",") ===
+          "workspace_id,company_id",
+      );
+    const campaignCompanyForeignKey = config.foreignKeys
+      .map((foreignKey) => foreignKey.reference())
+      .find(
+        (reference) =>
+          columnNames(reference.columns).join(",") ===
+          "workspace_id,company_id,campaign_company_id",
+      );
+    const unique = config.indexes.find(
+      (index) => index.config.name === "company_contacts_company_email_unique",
+    );
+
+    expect(columnNames(companyForeignKey!.foreignColumns)).toEqual([
+      "workspace_id",
+      "id",
+    ]);
+    expect(columnNames(campaignCompanyForeignKey!.foreignColumns)).toEqual([
+      "workspace_id",
+      "company_id",
+      "id",
+    ]);
+    expect(columnNames(unique!.config.columns as { name: string }[])).toEqual([
+      "company_id",
+      "corporate_email",
+    ]);
+    expect(
+      config.indexes.map((index) => ({
+        name: index.config.name,
+        columns: columnNames(index.config.columns as { name: string }[]),
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          name: "company_contacts_workspace_company_idx",
+          columns: ["workspace_id", "company_id"],
+        },
+        {
+          name: "company_contacts_workspace_campaign_company_idx",
+          columns: ["workspace_id", "campaign_company_id"],
+        },
+      ]),
+    );
   });
 
   it("keeps sources unique per company and tenant-safe", () => {

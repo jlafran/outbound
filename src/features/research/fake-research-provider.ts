@@ -10,6 +10,7 @@ import {
   type ResearchCompany,
   type ResearchProvider,
 } from "./research-provider";
+import type { ResearchRepository } from "./research-repository";
 import { evidenceSchema } from "./research-schema";
 import {
   scoreCompany,
@@ -23,6 +24,7 @@ const campaignInputSchema = z
   .object({
     workspaceId: z.string().trim().min(1),
     campaignId: z.string().trim().min(1),
+    offerId: z.string().trim().min(1).optional(),
   })
   .strict();
 
@@ -366,7 +368,10 @@ function createCampaignCompanyId(
 }
 
 export class FakeResearchProvider implements ResearchProvider {
-  constructor(private readonly companyRepository: CompanyRepository) {}
+  constructor(
+    private readonly companyRepository: CompanyRepository,
+    private readonly researchRepository?: ResearchRepository,
+  ) {}
 
   async researchCampaign(
     input: ResearchCampaignInput,
@@ -395,6 +400,14 @@ export class FakeResearchProvider implements ResearchProvider {
       });
     }
 
-    return structuredClone(researchResultSchema.parse({ companies }));
+    const result = researchResultSchema.parse({ companies });
+    await this.researchRepository?.persistCampaignResearch({
+      workspaceId: parsedInput.workspaceId,
+      campaignId: parsedInput.campaignId,
+      offerId: parsedInput.offerId,
+      companies: result.companies,
+    });
+
+    return structuredClone(result);
   }
 }

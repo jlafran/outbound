@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  doublePrecision,
   foreignKey,
   index,
   jsonb,
@@ -15,6 +16,7 @@ import {
   confidenceValues,
   evidenceKindValues,
 } from "@/features/research/research-schema";
+import type { ScoreCompanyResult } from "@/features/research/score-company";
 
 import { campaigns } from "./campaigns";
 import { companies } from "./companies";
@@ -58,6 +60,8 @@ export const campaignCompanies = pgTable(
     companyId: text("company_id").notNull(),
     status: campaignCompanyStatus("status").notNull(),
     fitReason: text("fit_reason"),
+    scoreTotal: doublePrecision("score_total"),
+    scoreSnapshot: jsonb("score_snapshot").$type<ScoreCompanyResult>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
@@ -84,6 +88,59 @@ export const campaignCompanies = pgTable(
       table.workspaceId,
       table.companyId,
       table.id,
+    ),
+  ],
+);
+
+export const companyContacts = pgTable(
+  "company_contacts",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id),
+    companyId: text("company_id").notNull(),
+    campaignCompanyId: text("campaign_company_id"),
+    name: text("name").notNull(),
+    role: text("role").notNull(),
+    corporateEmail: text("corporate_email").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "company_contacts_workspace_company_fk",
+      columns: [table.workspaceId, table.companyId],
+      foreignColumns: [companies.workspaceId, companies.id],
+    }),
+    foreignKey({
+      name: "company_contacts_workspace_campaign_company_fk",
+      columns: [
+        table.workspaceId,
+        table.companyId,
+        table.campaignCompanyId,
+      ],
+      foreignColumns: [
+        campaignCompanies.workspaceId,
+        campaignCompanies.companyId,
+        campaignCompanies.id,
+      ],
+    }),
+    uniqueIndex("company_contacts_company_email_unique").on(
+      table.companyId,
+      table.corporateEmail,
+    ),
+    uniqueIndex("company_contacts_workspace_id_unique").on(
+      table.workspaceId,
+      table.id,
+    ),
+    index("company_contacts_workspace_company_idx").on(
+      table.workspaceId,
+      table.companyId,
+    ),
+    index("company_contacts_workspace_campaign_company_idx").on(
+      table.workspaceId,
+      table.campaignCompanyId,
     ),
   ],
 );

@@ -6,6 +6,7 @@ import {
   type CompanyRepository,
 } from "@/features/companies/company-repository";
 import { FakeResearchProvider } from "@/features/research/fake-research-provider";
+import { createMemoryResearchRepository } from "@/features/research/research-repository";
 import { evidenceSchema } from "@/features/research/research-schema";
 import {
   scoreCompany,
@@ -160,6 +161,52 @@ describe("FakeResearchProvider", () => {
       ),
     ).toBe(true);
     expect(await repository.count(input.workspaceId)).toBe(3);
+  });
+
+  it("persists reusable research artifacts idempotently when a research repository is provided", async () => {
+    const companyRepository = createMemoryCompanyRepository();
+    const researchRepository = createMemoryResearchRepository();
+    const provider = new FakeResearchProvider(
+      companyRepository,
+      researchRepository,
+    );
+    const campaignInput = { ...input, offerId: "offer-1" };
+
+    const first = await provider.researchCampaign(campaignInput);
+    const second = await provider.researchCampaign(campaignInput);
+
+    expect(second).toEqual(first);
+    expect(
+      await researchRepository.countCampaignCompanies(input.workspaceId),
+    ).toBe(3);
+    expect(await researchRepository.countContacts(input.workspaceId)).toBe(3);
+    expect(await researchRepository.countSources(input.workspaceId)).toBe(12);
+    expect(await researchRepository.countEvidence(input.workspaceId)).toBe(12);
+    expect(
+      await researchRepository.countOfferOpportunities(input.workspaceId),
+    ).toBe(3);
+
+    const topCompany = await researchRepository.getCampaignCompanyMaterial({
+      workspaceId: input.workspaceId,
+      campaignCompanyId: first.companies[0].campaignCompanyId,
+    });
+
+    expect(topCompany).toMatchObject({
+      companyId: first.companies[0].companyId,
+      campaignCompanyId: first.companies[0].campaignCompanyId,
+      name: first.companies[0].name,
+      domain: first.companies[0].domain,
+      score: first.companies[0].score,
+      contacts: first.companies[0].contacts,
+      evidence: first.companies[0].evidence,
+      opportunities: [
+        expect.objectContaining({
+          offerId: "offer-1",
+          campaignCompanyId: first.companies[0].campaignCompanyId,
+          status: "candidate",
+        }),
+      ],
+    });
   });
 
   it("does not leak caller mutations into later calls", async () => {

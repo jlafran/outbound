@@ -20,6 +20,7 @@ export type ResearchCompany = {
 export type ResearchCampaignInput = {
   workspaceId: string;
   campaignId: string;
+  offerId?: string;
 };
 
 export type ResearchCampaignResult = {
