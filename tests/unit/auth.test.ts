@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   authenticateWorkspaceMember,
   createAuthOptions,
+  getAuthProviderVisibility,
   getAuthConfigurationError,
   normalizeEmail,
+  resolveAuthEnvironment,
   resolveE2EIdentity,
   sanitizeCallbackUrl,
   type WorkspaceMembershipResolver,
@@ -158,6 +160,44 @@ describe("internal authentication", () => {
     ).toBe("GOOGLE_AUTH_NOT_CONFIGURED");
   });
 
+  it("selects only Google from a genuinely production environment", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const environment = resolveAuthEnvironment(process.env.NODE_ENV);
+    const options = createAuthOptions({
+      environment,
+      env: baseEnv,
+      membershipResolver: resolverWith([]),
+    });
+
+    expect(environment).toBe("production");
+    expect(options.providers.map((provider) => provider.id)).toEqual([
+      "google",
+    ]);
+    expect(getAuthProviderVisibility(environment, baseEnv)).toEqual({
+      showGoogle: true,
+      showCredentials: false,
+    });
+  });
+
+  it("selects only credentials from a genuinely development environment", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const environment = resolveAuthEnvironment(process.env.NODE_ENV);
+    const options = createAuthOptions({
+      environment,
+      env: baseEnv,
+      membershipResolver: resolverWith([]),
+    });
+
+    expect(environment).toBe("development");
+    expect(options.providers.map((provider) => provider.id)).toEqual([
+      "credentials",
+    ]);
+    expect(getAuthProviderVisibility(environment, baseEnv)).toEqual({
+      showGoogle: false,
+      showCredentials: true,
+    });
+  });
+
   it("rejects production auth when NEXTAUTH_URL is missing", () => {
     expect(
       getAuthConfigurationError("production", {
@@ -201,6 +241,16 @@ describe("internal authentication", () => {
 
     expect(getAuthConfigurationError("production", env)).toBeNull();
     expect(options.useSecureCookies).toBe(true);
+  });
+
+  it("accepts HTTPS NEXTAUTH_URL when APP_URL is absent", () => {
+    const env = {
+      ...baseEnv,
+      APP_URL: undefined,
+      NEXTAUTH_URL: "https://outreach.example.com",
+    };
+
+    expect(getAuthConfigurationError("production", env)).toBeNull();
   });
 
   it("accepts localhost HTTP origins in development without secure cookies", () => {

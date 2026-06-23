@@ -13,6 +13,15 @@ describe("parseEnv", () => {
     expect(parseEnv(validEnv).APP_URL).toBe("http://localhost:3000");
   });
 
+  it("uses NEXTAUTH_URL as APP_URL when APP_URL is absent", () => {
+    expect(
+      parseEnv({
+        ...validEnv,
+        NEXTAUTH_URL: "https://outreach.example.com",
+      }).APP_URL,
+    ).toBe("https://outreach.example.com");
+  });
+
   it("normalizes the comma-separated allowed email list", () => {
     expect(parseEnv(validEnv).ALLOWED_EMAILS).toEqual([
       "admin@example.com",

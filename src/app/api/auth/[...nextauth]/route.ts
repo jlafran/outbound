@@ -4,26 +4,19 @@ import { NextResponse } from "next/server";
 import {
   authOptions,
   getAuthConfigurationError,
-  type AuthEnvironment,
+  resolveAuthEnvironment,
 } from "@/lib/auth";
+import { authEnv } from "@/lib/auth-env";
 
 const nextAuthHandler = NextAuth(authOptions);
-
-function environment(): AuthEnvironment {
-  return process.env.NODE_ENV === "production"
-    ? "production"
-    : process.env.NODE_ENV === "test"
-      ? "test"
-      : "development";
-}
 
 async function handler(
   request: Request,
   context: { params: Promise<{ nextauth: string[] }> },
 ) {
   const configurationError = getAuthConfigurationError(
-    environment(),
-    process.env,
+    resolveAuthEnvironment(process.env.NODE_ENV),
+    authEnv,
   );
   if (configurationError) {
     return NextResponse.json(

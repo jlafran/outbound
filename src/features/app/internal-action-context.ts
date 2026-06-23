@@ -2,7 +2,11 @@ import type { NextRequest } from "next/server";
 import type { Session } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 
-import { getServerAuthSession } from "@/lib/auth";
+import {
+  getServerAuthSession,
+  validateTokenAuthorization,
+  type WorkspaceMembershipResolver,
+} from "@/lib/auth";
 
 export type InternalActionContext = {
   workspaceId: string;
@@ -64,28 +68,57 @@ export async function resolveInternalActionContext(
   throw new InternalActionContextError();
 }
 
+type RequestContextDependencies = {
+  getRequestToken: (request: Request) => Promise<JWT | null>;
+  membershipResolver: WorkspaceMembershipResolver;
+  allowedEmails: string | string[] | undefined;
+  now: () => number;
+};
+
+async function defaultRequestContextDependencies(): Promise<RequestContextDependencies> {
+  const [{ env }, { lazyDrizzleMembershipResolver }, { getToken }] =
+    await Promise.all([
+      import("@/lib/env"),
+      import("@/lib/auth"),
+      import("next-auth/jwt"),
+    ]);
+  return {
+    async getRequestToken(request) {
+      return getToken({
+        req: request as NextRequest,
+        secret: env.AUTH_SECRET,
+      });
+    },
+    membershipResolver: lazyDrizzleMembershipResolver,
+    allowedEmails: env.ALLOWED_EMAILS,
+    now: () => Math.floor(Date.now() / 1000),
+  };
+}
+
 async function resolveTokenRequestContext(
   request: Request,
-  getRequestToken?: (request: Request) => Promise<JWT | null>,
+  dependencies?: RequestContextDependencies,
 ): Promise<InternalActionContext | null> {
-  if (getRequestToken) {
-    return validateInternalIdentity(await getRequestToken(request));
-  }
-  const [{ env }, { getToken }] = await Promise.all([
-    import("@/lib/env"),
-    import("next-auth/jwt"),
-  ]);
-  const token = await getToken({
-    req: request as NextRequest,
-    secret: env.AUTH_SECRET,
-  });
-
-  return validateInternalIdentity(token);
+  const resolvedDependencies =
+    dependencies ?? (await defaultRequestContextDependencies());
+  const token = await resolvedDependencies.getRequestToken(request);
+  const authorization = await validateTokenAuthorization(
+    token,
+    resolvedDependencies.allowedEmails,
+    resolvedDependencies.membershipResolver,
+    resolvedDependencies.now(),
+  );
+  return authorization
+    ? {
+        workspaceId: authorization.member.workspaceId,
+        actorId: authorization.member.userId,
+      }
+    : null;
 }
 
 export async function resolveInternalRequestContext(
   request: Request,
-  getRequestToken?: (request: Request) => Promise<JWT | null>,
+  dependencies?: RequestContextDependencies,
 ): Promise<InternalActionContext | null> {
   if (process.env.OUTREACH_E2E_MODE === "1") {
     if (process.env.NODE_ENV === "production") {
@@ -98,5 +131,5 @@ export async function resolveInternalRequestContext(
     };
   }
 
-  return resolveTokenRequestContext(request, getRequestToken);
+  return resolveTokenRequestContext(request, dependencies);
 }

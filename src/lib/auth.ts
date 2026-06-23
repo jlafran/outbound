@@ -8,6 +8,7 @@ import GoogleProvider from "next-auth/providers/google";
 
 import type { db as applicationDb } from "@/db/client";
 import { users, workspaceMembers } from "@/db/schema";
+import { authEnv } from "@/lib/auth-env";
 
 export type AuthEnvironment = "development" | "production" | "test";
 
@@ -28,7 +29,7 @@ export type AuthenticatedWorkspaceMember = WorkspaceMembership & {
 
 export type AuthEnvironmentVariables = {
   AUTH_SECRET?: string;
-  ALLOWED_EMAILS?: string;
+  ALLOWED_EMAILS?: string | string[];
   APP_URL?: string;
   NEXTAUTH_URL?: string;
   GOOGLE_CLIENT_ID?: string;
@@ -42,7 +43,7 @@ type CreateAuthOptionsInput = {
   membershipResolver: WorkspaceMembershipResolver;
 };
 
-const AUTHORIZATION_REVALIDATION_SECONDS = 5 * 60;
+export const AUTHORIZATION_REVALIDATION_SECONDS = 5 * 60;
 const AUTH_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
 
 export function normalizeEmail(email: string): string {
@@ -72,6 +73,73 @@ function authorizationRevalidationRequired(
   );
 }
 
+type TokenAuthorizationClaims = {
+  email?: unknown;
+  userId?: unknown;
+  workspaceId?: unknown;
+  authorizationCheckedAt?: unknown;
+};
+
+export type TokenAuthorizationValidation = {
+  member: AuthenticatedWorkspaceMember;
+  revalidated: boolean;
+};
+
+export async function validateTokenAuthorization(
+  token: TokenAuthorizationClaims | null | undefined,
+  allowedEmails: string | string[] | undefined,
+  resolver: WorkspaceMembershipResolver,
+  now: number = Math.floor(Date.now() / 1000),
+): Promise<TokenAuthorizationValidation | null> {
+  if (
+    !token ||
+    typeof token.email !== "string" ||
+    typeof token.userId !== "string" ||
+    token.userId.length === 0 ||
+    typeof token.workspaceId !== "string" ||
+    token.workspaceId.length === 0
+  ) {
+    return null;
+  }
+
+  const email = normalizeEmail(token.email);
+  if (email.length === 0) return null;
+
+  if (
+    !authorizationRevalidationRequired(
+      token.authorizationCheckedAt,
+      now,
+    )
+  ) {
+    return {
+      member: {
+        email,
+        userId: token.userId,
+        workspaceId: token.workspaceId,
+      },
+      revalidated: false,
+    };
+  }
+
+  try {
+    const member = await authenticateWorkspaceMember(
+      email,
+      allowedEmails,
+      resolver,
+    );
+    if (
+      !member ||
+      member.userId !== token.userId ||
+      member.workspaceId !== token.workspaceId
+    ) {
+      return null;
+    }
+    return { member, revalidated: true };
+  } catch {
+    return null;
+  }
+}
+
 function timingSafePasswordMatches(
   candidate: string,
   expected: string,
@@ -81,10 +149,9 @@ function timingSafePasswordMatches(
   return timingSafeEqual(candidateDigest, expectedDigest);
 }
 
-function allowedEmailSet(value: string | undefined): Set<string> {
+function allowedEmailSet(value: string | string[] | undefined): Set<string> {
   return new Set(
-    (value ?? "")
-      .split(",")
+    (Array.isArray(value) ? value : (value ?? "").split(","))
       .map(normalizeEmail)
       .filter(Boolean),
   );
@@ -92,7 +159,7 @@ function allowedEmailSet(value: string | undefined): Set<string> {
 
 export async function authenticateWorkspaceMember(
   email: string,
-  allowedEmails: string | undefined,
+  allowedEmails: string | string[] | undefined,
   resolver: WorkspaceMembershipResolver,
 ): Promise<AuthenticatedWorkspaceMember | null> {
   const normalizedEmail = normalizeEmail(email);
@@ -145,7 +212,7 @@ export function createDrizzleWorkspaceMembershipResolver(
   };
 }
 
-const lazyDrizzleMembershipResolver: WorkspaceMembershipResolver = {
+export const lazyDrizzleMembershipResolver: WorkspaceMembershipResolver = {
   async findMembershipsByEmail(normalizedEmail) {
     const { db } = await import("@/db/client");
     return createDrizzleWorkspaceMembershipResolver(
@@ -195,16 +262,39 @@ export function getAuthConfigurationError(
   return null;
 }
 
+export function resolveAuthEnvironment(
+  nodeEnvironment: string | undefined,
+): AuthEnvironment {
+  return nodeEnvironment === "production"
+    ? "production"
+    : nodeEnvironment === "test"
+      ? "test"
+      : "development";
+}
+
+export function getAuthProviderVisibility(
+  environment: AuthEnvironment,
+  env: AuthEnvironmentVariables,
+): { showGoogle: boolean; showCredentials: boolean } {
+  return {
+    showGoogle:
+      environment === "production" &&
+      Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
+    showCredentials:
+      environment !== "production" &&
+      typeof env.DEV_AUTH_PASSWORD === "string" &&
+      env.DEV_AUTH_PASSWORD.length >= 12,
+  };
+}
+
 export function createAuthOptions({
   environment,
   env,
   membershipResolver,
 }: CreateAuthOptionsInput): AuthOptions {
   const providers: AuthOptions["providers"] = [];
-  const hasGoogle = Boolean(
-    env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET,
-  );
-  if (hasGoogle) {
+  const visibility = getAuthProviderVisibility(environment, env);
+  if (visibility.showGoogle) {
     providers.push(
       GoogleProvider({
         clientId: env.GOOGLE_CLIENT_ID!,
@@ -213,11 +303,7 @@ export function createAuthOptions({
     );
   }
 
-  if (
-    environment !== "production" &&
-    typeof env.DEV_AUTH_PASSWORD === "string" &&
-    env.DEV_AUTH_PASSWORD.length >= 12
-  ) {
+  if (visibility.showCredentials) {
     providers.push(
       CredentialsProvider({
         name: "Development credentials",
@@ -281,36 +367,20 @@ export function createAuthOptions({
       async jwt({ token, user }) {
         if (!user) {
           const now = Math.floor(Date.now() / 1000);
-          if (
-            !authorizationRevalidationRequired(
-              token.authorizationCheckedAt,
-              now,
-            )
-          ) {
-            return token;
-          }
-          if (typeof token.email !== "string") {
+          const authorization = await validateTokenAuthorization(
+            token,
+            env.ALLOWED_EMAILS,
+            membershipResolver,
+            now,
+          );
+          if (!authorization) {
             return stripTokenAuthorization(token);
           }
-          try {
-            const member = await authenticateWorkspaceMember(
-              token.email,
-              env.ALLOWED_EMAILS,
-              membershipResolver,
-            );
-            if (
-              !member ||
-              member.userId !== token.userId ||
-              member.workspaceId !== token.workspaceId
-            ) {
-              return stripTokenAuthorization(token);
-            }
-            token.email = member.email;
+          token.email = authorization.member.email;
+          if (authorization.revalidated) {
             token.authorizationCheckedAt = now;
-            return token;
-          } catch {
-            return stripTokenAuthorization(token);
           }
+          return token;
         }
         if (!user.email) {
           return stripTokenAuthorization(token);
@@ -361,17 +431,9 @@ export function createAuthOptions({
   };
 }
 
-function currentEnvironment(): AuthEnvironment {
-  return process.env.NODE_ENV === "production"
-    ? "production"
-    : process.env.NODE_ENV === "test"
-      ? "test"
-      : "development";
-}
-
 export const authOptions = createAuthOptions({
-  environment: currentEnvironment(),
-  env: process.env,
+  environment: resolveAuthEnvironment(process.env.NODE_ENV),
+  env: authEnv,
   membershipResolver: lazyDrizzleMembershipResolver,
 });
 
@@ -391,7 +453,7 @@ export function resolveE2EIdentity(
 
 export async function getServerAuthSession(): Promise<Session | null> {
   const e2eIdentity = resolveE2EIdentity(
-    currentEnvironment(),
+    resolveAuthEnvironment(process.env.NODE_ENV),
     process.env.OUTREACH_E2E_MODE,
   );
   if (e2eIdentity) {
