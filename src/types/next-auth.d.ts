@@ -21,5 +21,6 @@ declare module "next-auth/jwt" {
   interface JWT extends DefaultJWT {
     userId?: string;
     workspaceId?: string;
+    authorizationCheckedAt?: number;
   }
 }

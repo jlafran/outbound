@@ -41,6 +41,7 @@ describe("parseEnv", () => {
     expect(parsed.GOOGLE_CLIENT_ID).toBeUndefined();
     expect(parsed.GOOGLE_CLIENT_SECRET).toBeUndefined();
     expect(parsed.DEV_AUTH_PASSWORD).toBeUndefined();
+    expect(parsed.NEXTAUTH_URL).toBeUndefined();
   });
 
   it("accepts optional Google and development credential configuration", () => {
@@ -49,13 +50,24 @@ describe("parseEnv", () => {
       GOOGLE_CLIENT_ID: "google-client",
       GOOGLE_CLIENT_SECRET: "google-secret",
       DEV_AUTH_PASSWORD: "development-password",
+      NEXTAUTH_URL: "https://outreach.example.com",
     });
 
     expect(parsed).toMatchObject({
       GOOGLE_CLIENT_ID: "google-client",
       GOOGLE_CLIENT_SECRET: "google-secret",
       DEV_AUTH_PASSWORD: "development-password",
+      NEXTAUTH_URL: "https://outreach.example.com",
     });
+  });
+
+  it("rejects an invalid optional NEXTAUTH_URL", () => {
+    expect(() =>
+      parseEnv({
+        ...validEnv,
+        NEXTAUTH_URL: "not-a-url",
+      }),
+    ).toThrow();
   });
 
   it("rejects a configured development password shorter than 12 characters", () => {

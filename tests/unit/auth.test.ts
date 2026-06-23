@@ -23,10 +23,29 @@ function resolverWith(
 const baseEnv = {
   AUTH_SECRET: "a".repeat(32),
   ALLOWED_EMAILS: " owner@example.com ",
+  APP_URL: "http://localhost:3000",
+  NEXTAUTH_URL: "http://localhost:3000",
   GOOGLE_CLIENT_ID: "google-client",
   GOOGLE_CLIENT_SECRET: "google-secret",
   DEV_AUTH_PASSWORD: "development-password",
 };
+
+async function runJwtCallback(
+  options: ReturnType<typeof createAuthOptions>,
+  token: Record<string, unknown>,
+) {
+  const jwt = options.callbacks?.jwt;
+  if (!jwt) throw new Error("Expected JWT callback");
+  return jwt({
+    token,
+    user: undefined,
+    account: null,
+    profile: undefined,
+    trigger: undefined,
+    isNewUser: false,
+    session: undefined,
+  } as never);
+}
 
 describe("internal authentication", () => {
   afterEach(() => {
@@ -118,6 +137,8 @@ describe("internal authentication", () => {
       env: {
         AUTH_SECRET: baseEnv.AUTH_SECRET,
         ALLOWED_EMAILS: baseEnv.ALLOWED_EMAILS,
+        APP_URL: "https://outreach.example.com",
+        NEXTAUTH_URL: "https://outreach.example.com",
         DEV_AUTH_PASSWORD: baseEnv.DEV_AUTH_PASSWORD,
       },
       membershipResolver: resolver,
@@ -131,8 +152,66 @@ describe("internal authentication", () => {
       getAuthConfigurationError("production", {
         AUTH_SECRET: baseEnv.AUTH_SECRET,
         ALLOWED_EMAILS: baseEnv.ALLOWED_EMAILS,
+        APP_URL: "https://outreach.example.com",
+        NEXTAUTH_URL: "https://outreach.example.com",
       }),
     ).toBe("GOOGLE_AUTH_NOT_CONFIGURED");
+  });
+
+  it("rejects production auth when NEXTAUTH_URL is missing", () => {
+    expect(
+      getAuthConfigurationError("production", {
+        ...baseEnv,
+        NEXTAUTH_URL: undefined,
+      }),
+    ).toBe("NEXTAUTH_URL_NOT_CONFIGURED");
+  });
+
+  it("rejects an HTTP NEXTAUTH_URL in production", () => {
+    expect(
+      getAuthConfigurationError("production", {
+        ...baseEnv,
+        APP_URL: "https://outreach.example.com",
+        NEXTAUTH_URL: "http://outreach.example.com",
+      }),
+    ).toBe("NEXTAUTH_URL_MUST_USE_HTTPS");
+  });
+
+  it("rejects a production NEXTAUTH_URL on a different application origin", () => {
+    expect(
+      getAuthConfigurationError("production", {
+        ...baseEnv,
+        APP_URL: "https://outreach.example.com",
+        NEXTAUTH_URL: "https://auth.example.com",
+      }),
+    ).toBe("AUTH_ORIGIN_MISMATCH");
+  });
+
+  it("accepts aligned HTTPS production origins and enables secure cookies", () => {
+    const env = {
+      ...baseEnv,
+      APP_URL: "https://outreach.example.com",
+      NEXTAUTH_URL: "https://outreach.example.com/",
+    };
+    const options = createAuthOptions({
+      environment: "production",
+      env,
+      membershipResolver: resolverWith([]),
+    });
+
+    expect(getAuthConfigurationError("production", env)).toBeNull();
+    expect(options.useSecureCookies).toBe(true);
+  });
+
+  it("accepts localhost HTTP origins in development without secure cookies", () => {
+    const options = createAuthOptions({
+      environment: "development",
+      env: baseEnv,
+      membershipResolver: resolverWith([]),
+    });
+
+    expect(getAuthConfigurationError("development", baseEnv)).toBeNull();
+    expect(options.useSecureCookies).toBe(false);
   });
 
   it("never enables credentials in production", () => {
@@ -148,12 +227,13 @@ describe("internal authentication", () => {
   });
 
   it("requires the shared development password and an allowed member", async () => {
+    const resolver = resolverWith([
+      { userId: "user-1", workspaceId: "workspace-1" },
+    ]);
     const options = createAuthOptions({
       environment: "development",
       env: baseEnv,
-      membershipResolver: resolverWith([
-        { userId: "user-1", workspaceId: "workspace-1" },
-      ]),
+      membershipResolver: resolver,
     });
     const credentials = options.providers.find(
       (provider) => provider.id === "credentials",
@@ -180,6 +260,9 @@ describe("internal authentication", () => {
         ),
       ),
     ).resolves.toBeNull();
+    expect(resolver.findMembershipsByEmail).toHaveBeenCalledWith(
+      "owner@example.com",
+    );
     await expect(
       Promise.resolve(
         authorize(
@@ -240,6 +323,8 @@ describe("internal authentication", () => {
       sub: "user-1",
       userId: "user-1",
       workspaceId: "workspace-1",
+      email: "owner@example.com",
+      authorizationCheckedAt: expect.any(Number),
     });
 
     const result = await session({
@@ -265,6 +350,186 @@ describe("internal authentication", () => {
         workspaceId: "workspace-1",
       },
     });
+  });
+
+  it("strips stale workspace identity from a session after JWT revocation", async () => {
+    const options = createAuthOptions({
+      environment: "development",
+      env: baseEnv,
+      membershipResolver: resolverWith([]),
+    });
+    const session = options.callbacks?.session;
+    if (!session) throw new Error("Expected session callback");
+
+    const result = await session({
+      session: {
+        userId: "stale-user",
+        workspaceId: "stale-workspace",
+        user: {
+          email: "owner@example.com",
+          userId: "stale-user",
+          workspaceId: "stale-workspace",
+        },
+        expires: new Date(Date.now() + 60_000).toISOString(),
+      },
+      token: { email: "owner@example.com" },
+      user: {} as never,
+      newSession: undefined,
+      trigger: "update",
+    });
+
+    expect(result).not.toHaveProperty("userId");
+    expect(result).not.toHaveProperty("workspaceId");
+    expect(result.user).not.toHaveProperty("userId");
+    expect(result.user).not.toHaveProperty("workspaceId");
+  });
+
+  it("revokes an existing JWT when its email is removed from the allowlist", async () => {
+    const resolver = resolverWith([
+      { userId: "user-1", workspaceId: "workspace-1" },
+    ]);
+    const options = createAuthOptions({
+      environment: "development",
+      env: { ...baseEnv, ALLOWED_EMAILS: "" },
+      membershipResolver: resolver,
+    });
+
+    const token = await runJwtCallback(options, {
+      sub: "user-1",
+      userId: "user-1",
+      workspaceId: "workspace-1",
+      email: " OWNER@example.com ",
+    });
+
+    expect(token).not.toHaveProperty("sub");
+    expect(token).not.toHaveProperty("userId");
+    expect(token).not.toHaveProperty("workspaceId");
+    expect(resolver.findMembershipsByEmail).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["zero memberships", []],
+    [
+      "multiple memberships",
+      [
+        { userId: "user-1", workspaceId: "workspace-1" },
+        { userId: "user-1", workspaceId: "workspace-2" },
+      ],
+    ],
+    [
+      "a changed user",
+      [{ userId: "user-2", workspaceId: "workspace-1" }],
+    ],
+    [
+      "a changed workspace",
+      [{ userId: "user-1", workspaceId: "workspace-2" }],
+    ],
+  ])("revokes an existing JWT after revalidation finds %s", async (_, memberships) => {
+    const options = createAuthOptions({
+      environment: "development",
+      env: baseEnv,
+      membershipResolver: resolverWith(memberships),
+    });
+
+    const token = await runJwtCallback(options, {
+      sub: "user-1",
+      userId: "user-1",
+      workspaceId: "workspace-1",
+      email: "owner@example.com",
+    });
+
+    expect(token).not.toHaveProperty("sub");
+    expect(token).not.toHaveProperty("userId");
+    expect(token).not.toHaveProperty("workspaceId");
+  });
+
+  it("does not revalidate an existing JWT before the authorization interval", async () => {
+    vi.setSystemTime(new Date("2026-06-23T12:00:00Z"));
+    const resolver = resolverWith([]);
+    const options = createAuthOptions({
+      environment: "development",
+      env: baseEnv,
+      membershipResolver: resolver,
+    });
+
+    const token = await runJwtCallback(options, {
+      sub: "user-1",
+      userId: "user-1",
+      workspaceId: "workspace-1",
+      email: "owner@example.com",
+      authorizationCheckedAt: Math.floor(Date.now() / 1000) - 299,
+    });
+
+    expect(token).toMatchObject({
+      userId: "user-1",
+      workspaceId: "workspace-1",
+    });
+    expect(resolver.findMembershipsByEmail).not.toHaveBeenCalled();
+  });
+
+  it("revalidates an existing JWT after the authorization interval", async () => {
+    vi.setSystemTime(new Date("2026-06-23T12:00:00Z"));
+    const resolver = resolverWith([
+      { userId: "user-1", workspaceId: "workspace-1" },
+    ]);
+    const options = createAuthOptions({
+      environment: "development",
+      env: baseEnv,
+      membershipResolver: resolver,
+    });
+
+    const token = await runJwtCallback(options, {
+      sub: "user-1",
+      userId: "user-1",
+      workspaceId: "workspace-1",
+      email: " OWNER@example.com ",
+      authorizationCheckedAt: Math.floor(Date.now() / 1000) - 300,
+    });
+
+    expect(resolver.findMembershipsByEmail).toHaveBeenCalledWith(
+      "owner@example.com",
+    );
+    expect(token).toMatchObject({
+      userId: "user-1",
+      workspaceId: "workspace-1",
+      email: "owner@example.com",
+      authorizationCheckedAt: Math.floor(Date.now() / 1000),
+    });
+  });
+
+  it.each([undefined, "not-a-timestamp", Number.NaN, Number.POSITIVE_INFINITY])(
+    "fail-safe revalidates a JWT with malformed authorization timestamp %s",
+    async (authorizationCheckedAt) => {
+      const resolver = resolverWith([
+        { userId: "user-1", workspaceId: "workspace-1" },
+      ]);
+      const options = createAuthOptions({
+        environment: "development",
+        env: baseEnv,
+        membershipResolver: resolver,
+      });
+
+      await runJwtCallback(options, {
+        sub: "user-1",
+        userId: "user-1",
+        workspaceId: "workspace-1",
+        email: "owner@example.com",
+        authorizationCheckedAt,
+      });
+
+      expect(resolver.findMembershipsByEmail).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("limits JWT sessions to eight hours", () => {
+    const options = createAuthOptions({
+      environment: "development",
+      env: baseEnv,
+      membershipResolver: resolverWith([]),
+    });
+
+    expect(options.session?.maxAge).toBe(8 * 60 * 60);
+    expect(options.jwt?.maxAge).toBe(8 * 60 * 60);
   });
 
   it("sanitizes callback URLs to same-origin relative paths", () => {

@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+
 import { and, eq, sql } from "drizzle-orm";
 import type { AuthOptions, Session } from "next-auth";
 import { getServerSession } from "next-auth";
@@ -27,6 +29,8 @@ export type AuthenticatedWorkspaceMember = WorkspaceMembership & {
 export type AuthEnvironmentVariables = {
   AUTH_SECRET?: string;
   ALLOWED_EMAILS?: string;
+  APP_URL?: string;
+  NEXTAUTH_URL?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   DEV_AUTH_PASSWORD?: string;
@@ -38,8 +42,43 @@ type CreateAuthOptionsInput = {
   membershipResolver: WorkspaceMembershipResolver;
 };
 
+const AUTHORIZATION_REVALIDATION_SECONDS = 5 * 60;
+const AUTH_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
+
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+function stripTokenAuthorization<T extends Record<string, unknown>>(
+  token: T,
+): T {
+  delete token.userId;
+  delete token.workspaceId;
+  delete token.sub;
+  delete token.authorizationCheckedAt;
+  return token;
+}
+
+function authorizationRevalidationRequired(
+  checkedAt: unknown,
+  now: number,
+): boolean {
+  return (
+    typeof checkedAt !== "number" ||
+    !Number.isSafeInteger(checkedAt) ||
+    checkedAt < 0 ||
+    checkedAt > now ||
+    now - checkedAt >= AUTHORIZATION_REVALIDATION_SECONDS
+  );
+}
+
+function timingSafePasswordMatches(
+  candidate: string,
+  expected: string,
+): boolean {
+  const candidateDigest = createHash("sha256").update(candidate).digest();
+  const expectedDigest = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(candidateDigest, expectedDigest);
 }
 
 function allowedEmailSet(value: string | undefined): Set<string> {
@@ -122,6 +161,31 @@ export function getAuthConfigurationError(
   if (!env.AUTH_SECRET || env.AUTH_SECRET.length < 32) {
     return "AUTH_SECRET_NOT_CONFIGURED";
   }
+  if (environment === "production") {
+    if (!env.NEXTAUTH_URL) {
+      return "NEXTAUTH_URL_NOT_CONFIGURED";
+    }
+    let nextAuthUrl: URL;
+    try {
+      nextAuthUrl = new URL(env.NEXTAUTH_URL);
+    } catch {
+      return "NEXTAUTH_URL_INVALID";
+    }
+    if (nextAuthUrl.protocol !== "https:") {
+      return "NEXTAUTH_URL_MUST_USE_HTTPS";
+    }
+    if (env.APP_URL) {
+      let appUrl: URL;
+      try {
+        appUrl = new URL(env.APP_URL);
+      } catch {
+        return "APP_URL_INVALID";
+      }
+      if (appUrl.origin !== nextAuthUrl.origin) {
+        return "AUTH_ORIGIN_MISMATCH";
+      }
+    }
+  }
   if (
     environment === "production" &&
     (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET)
@@ -162,19 +226,21 @@ export function createAuthOptions({
           password: { label: "Password", type: "password" },
         },
         async authorize(credentials) {
-          if (
-            !credentials?.email ||
-            !credentials.password ||
-            credentials.password !== env.DEV_AUTH_PASSWORD
-          ) {
+          const passwordMatches = timingSafePasswordMatches(
+            credentials?.password ?? "",
+            env.DEV_AUTH_PASSWORD!,
+          );
+          let member: AuthenticatedWorkspaceMember | null = null;
+          try {
+            member = await authenticateWorkspaceMember(
+              credentials?.email ?? "",
+              env.ALLOWED_EMAILS,
+              membershipResolver,
+            );
+          } catch {
             return null;
           }
-          const member = await authenticateWorkspaceMember(
-            credentials.email,
-            env.ALLOWED_EMAILS,
-            membershipResolver,
-          );
-          return member
+          return passwordMatches && member
             ? {
                 id: member.userId,
                 email: member.email,
@@ -189,7 +255,12 @@ export function createAuthOptions({
 
   return {
     secret: env.AUTH_SECRET,
-    session: { strategy: "jwt" },
+    useSecureCookies: environment === "production",
+    session: {
+      strategy: "jwt",
+      maxAge: AUTH_SESSION_MAX_AGE_SECONDS,
+    },
+    jwt: { maxAge: AUTH_SESSION_MAX_AGE_SECONDS },
     providers,
     pages: { signIn: "/auth/signin" },
     callbacks: {
@@ -209,13 +280,40 @@ export function createAuthOptions({
       },
       async jwt({ token, user }) {
         if (!user) {
-          return token;
+          const now = Math.floor(Date.now() / 1000);
+          if (
+            !authorizationRevalidationRequired(
+              token.authorizationCheckedAt,
+              now,
+            )
+          ) {
+            return token;
+          }
+          if (typeof token.email !== "string") {
+            return stripTokenAuthorization(token);
+          }
+          try {
+            const member = await authenticateWorkspaceMember(
+              token.email,
+              env.ALLOWED_EMAILS,
+              membershipResolver,
+            );
+            if (
+              !member ||
+              member.userId !== token.userId ||
+              member.workspaceId !== token.workspaceId
+            ) {
+              return stripTokenAuthorization(token);
+            }
+            token.email = member.email;
+            token.authorizationCheckedAt = now;
+            return token;
+          } catch {
+            return stripTokenAuthorization(token);
+          }
         }
         if (!user.email) {
-          delete token.userId;
-          delete token.workspaceId;
-          delete token.sub;
-          return token;
+          return stripTokenAuthorization(token);
         }
         try {
           const member = await authenticateWorkspaceMember(
@@ -224,21 +322,16 @@ export function createAuthOptions({
             membershipResolver,
           );
           if (!member) {
-            delete token.userId;
-            delete token.workspaceId;
-            delete token.sub;
-            return token;
+            return stripTokenAuthorization(token);
           }
           token.sub = member.userId;
           token.userId = member.userId;
           token.workspaceId = member.workspaceId;
           token.email = member.email;
+          token.authorizationCheckedAt = Math.floor(Date.now() / 1000);
           return token;
         } catch {
-          delete token.userId;
-          delete token.workspaceId;
-          delete token.sub;
-          return token;
+          return stripTokenAuthorization(token);
         }
       },
       async session({ session, token }) {
@@ -248,6 +341,12 @@ export function createAuthOptions({
           typeof token.workspaceId !== "string" ||
           token.workspaceId.length === 0
         ) {
+          delete session.userId;
+          delete session.workspaceId;
+          if (session.user) {
+            delete session.user.userId;
+            delete session.user.workspaceId;
+          }
           return session;
         }
         session.userId = token.userId;
