@@ -174,7 +174,6 @@ export function createDrizzleResearchRepository(
                 companyContacts.corporateEmail,
               ],
               set: {
-                campaignCompanyId: company.campaignCompanyId,
                 name: contact.name,
                 role: contact.role,
                 updatedAt: now,
@@ -186,7 +185,7 @@ export function createDrizzleResearchRepository(
           const sourceId = `${company.campaignCompanyId}:source:${index + 1}`;
           const sourceUrl = item.sourceUrl ?? "";
 
-          await database
+          const [source] = await database
             .insert(sources)
             .values({
               id: sourceId,
@@ -202,7 +201,9 @@ export function createDrizzleResearchRepository(
               set: {
                 observedAt: item.observedAt,
               },
-            });
+            })
+            .returning({ id: sources.id });
+          const persistedSourceId = source?.id ?? sourceId;
 
           await database
             .insert(evidenceTable)
@@ -211,7 +212,7 @@ export function createDrizzleResearchRepository(
               workspaceId: input.workspaceId,
               companyId: company.companyId,
               campaignCompanyId: company.campaignCompanyId,
-              sourceId,
+              sourceId: persistedSourceId,
               kind: item.kind,
               confidence: item.confidence,
               statement: item.statement,
@@ -222,7 +223,7 @@ export function createDrizzleResearchRepository(
             .onConflictDoUpdate({
               target: evidenceTable.id,
               set: {
-                sourceId,
+                sourceId: persistedSourceId,
                 kind: item.kind,
                 confidence: item.confidence,
                 statement: item.statement,
@@ -257,7 +258,6 @@ export function createDrizzleResearchRepository(
                 offerOpportunities.offerId,
               ],
               set: {
-                campaignCompanyId: company.campaignCompanyId,
                 status: "candidate",
                 problem,
                 rationale: company.score.explanation,
@@ -334,7 +334,7 @@ export function createDrizzleResearchRepository(
         .where(
           and(
             eq(companyContacts.workspaceId, workspaceId),
-            eq(companyContacts.campaignCompanyId, campaignCompany.id),
+            eq(companyContacts.companyId, campaignCompany.companyId),
           ),
         )
         .orderBy(asc(companyContacts.id));
@@ -369,7 +369,7 @@ export function createDrizzleResearchRepository(
         .where(
           and(
             eq(offerOpportunities.workspaceId, workspaceId),
-            eq(offerOpportunities.campaignCompanyId, campaignCompany.id),
+            eq(offerOpportunities.companyId, campaignCompany.companyId),
           ),
         )
         .orderBy(asc(offerOpportunities.id));
@@ -497,8 +497,11 @@ export function createMemoryResearchRepository(): ResearchRepository {
 
         company.evidence.forEach((item, index) => {
           const sourceId = `${company.campaignCompanyId}:source:${index + 1}`;
-          sources.set(sourceId, {
-            id: sourceId,
+          const sourceKey = `${input.workspaceId}:${company.companyId}:${item.sourceUrl ?? ""}`;
+          const existingSource = sources.get(sourceKey);
+          const persistedSourceId = existingSource?.id ?? sourceId;
+          sources.set(sourceKey, {
+            id: persistedSourceId,
             workspaceId: input.workspaceId,
             companyId: company.companyId,
             url: item.sourceUrl ?? "",
@@ -510,7 +513,7 @@ export function createMemoryResearchRepository(): ResearchRepository {
             workspaceId: input.workspaceId,
             companyId: company.companyId,
             campaignCompanyId: company.campaignCompanyId,
-            sourceId,
+            sourceId: persistedSourceId,
             ...cloneMaterial(item),
           });
         });
@@ -576,7 +579,7 @@ export function createMemoryResearchRepository(): ResearchRepository {
           .filter(
             (contact) =>
               contact.workspaceId === workspaceId &&
-              contact.campaignCompanyId === campaignCompany.id,
+              contact.companyId === campaignCompany.companyId,
           )
           .map((contact) => ({
             name: contact.name,
@@ -601,7 +604,7 @@ export function createMemoryResearchRepository(): ResearchRepository {
         opportunities: [...opportunities.values()].filter(
           (opportunity) =>
             opportunity.workspaceId === workspaceId &&
-            opportunity.campaignCompanyId === campaignCompany.id,
+            opportunity.companyId === campaignCompany.companyId,
         ),
       };
 
