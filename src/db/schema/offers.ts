@@ -13,11 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { workspaceMembers, workspaces } from "./workspaces";
-
-export const offerTicketBandValues = [
-  "usd_5k_15k",
-  "usd_15k_plus",
-] as const;
+import { offerTicketBandValues } from "@/features/offers/offer-schema";
 
 export const offerTicketBand = pgEnum(
   "offer_ticket_band",

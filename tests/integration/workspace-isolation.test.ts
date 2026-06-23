@@ -79,6 +79,7 @@ function campaign(
     name: "Internal campaign",
     targetDailyEmails: 25,
     paidDataMode: "free",
+    targetTicketBand: "usd_5k_15k",
     state: "draft",
     nicheRecommendationIds: [],
     approvedNicheIds: [],

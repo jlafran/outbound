@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { offerTicketBandSchema } from "@/features/offers/offer-schema";
+
 export const campaignStateValues = [
   "draft",
   "niche_review",
@@ -25,6 +27,7 @@ export const campaignInputSchema = z.object({
   name: z.string().trim().min(2),
   targetDailyEmails: z.number().int().min(1).max(200),
   paidDataMode: z.enum(paidDataModeValues),
+  targetTicketBand: offerTicketBandSchema,
 });
 
 export const campaignRecordSchema = campaignInputSchema

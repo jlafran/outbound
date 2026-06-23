@@ -42,6 +42,7 @@ export class CampaignService {
       name: input.name,
       targetDailyEmails: input.targetDailyEmails,
       paidDataMode: input.paidDataMode,
+      targetTicketBand: input.targetTicketBand,
     });
     if (!result.success) {
       throw new CampaignError("INVALID_CAMPAIGN_INPUT", {
@@ -112,8 +113,7 @@ export class CampaignService {
     this.requireExpectedVersion(campaign, expectedVersion);
     this.requireState(campaign, "draft");
     const recommendations = await this.generateNicheRecommendations(
-      workspaceId,
-      campaign.offerId,
+      campaign,
     );
     const recommendationIds = recommendations.map(({ id }) => id);
 
@@ -168,8 +168,7 @@ export class CampaignService {
       throw new CampaignError("NICHE_RECOMMENDATIONS_REQUIRED");
     }
     const recommendations = await this.generateNicheRecommendations(
-      workspaceId,
-      campaign.offerId,
+      campaign,
     );
     const recommendationIds = recommendations.map(({ id }) => id);
     if (
@@ -301,20 +300,24 @@ export class CampaignService {
   }
 
   private async generateNicheRecommendations(
-    workspaceId: string,
-    offerId: string,
+    campaign: CampaignRecord,
   ): Promise<NicheRecommendation[]> {
-    const offer = await this.offerRepository.getById(workspaceId, offerId);
+    const offer = await this.offerRepository.getById(
+      campaign.workspaceId,
+      campaign.offerId,
+    );
 
     if (!offer) {
       throw new CampaignError("OFFER_REQUIRED");
     }
+    const effectiveOffer = normalizedOfferSchema.parse({
+      ...offer,
+      ticketBand: campaign.targetTicketBand,
+    });
 
     const recommendationResult =
       rankedNicheRecommendationListSchema.safeParse(
-        await this.nicheAdvisor.recommend(
-          normalizedOfferSchema.parse(offer),
-        ),
+        await this.nicheAdvisor.recommend(effectiveOffer),
       );
     if (!recommendationResult.success) {
       throw new CampaignError("INVALID_NICHE_RECOMMENDATIONS", {
@@ -322,7 +325,7 @@ export class CampaignService {
       });
     }
     const recommendations = recommendationResult.data;
-    if (!areNicheRecommendationsSafe(offer, recommendations)) {
+    if (!areNicheRecommendationsSafe(effectiveOffer, recommendations)) {
       throw new CampaignError("UNSAFE_NICHE_RECOMMENDATION");
     }
     return recommendations;

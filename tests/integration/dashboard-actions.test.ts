@@ -60,6 +60,7 @@ function campaignForm(offerId: string) {
   formData.set("name", "Argentina operaciones");
   formData.set("targetDailyEmails", "50");
   formData.set("paidDataMode", "fallback");
+  formData.set("targetTicketBand", "usd_5k_15k");
   return formData;
 }
 
@@ -255,7 +256,36 @@ describe("dashboard action submissions", () => {
       workspaceId: workspaceOne.workspaceId,
       createdBy: workspaceOne.actorId,
       state: "draft",
+      targetTicketBand: "usd_5k_15k",
       version: 1,
+    });
+  });
+
+  it.each([
+    ["missing", null],
+    ["invalid", "usd_50k_plus"],
+  ])("rejects %s campaign target ticket input", async (_label, value) => {
+    const offerId = await createOffer(services);
+    const formData = campaignForm(offerId);
+    if (value === null) {
+      formData.delete("targetTicketBand");
+    } else {
+      formData.set("targetTicketBand", value);
+    }
+
+    const result = await createCampaignSubmission(
+      {
+        services,
+        resolveContext: resolveContext(workspaceOne),
+      },
+      formData,
+    );
+
+    expect(result).toEqual({
+      status: "error",
+      fieldErrors: {
+        targetTicketBand: ["Seleccioná un ticket objetivo"],
+      },
     });
   });
 

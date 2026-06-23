@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ActionState } from "@/features/app/action-state";
 import type { AppServices } from "@/features/app/app-services";
 import type { InternalActionContext } from "@/features/app/internal-action-context";
+import { offerTicketBandValues } from "@/features/offers/offer-schema";
 
 import { CampaignError } from "./campaign-schema";
 
@@ -38,6 +39,9 @@ const campaignFormSchema = z.object({
     .max(200, "El máximo es 200"),
   paidDataMode: z.enum(["free", "paid", "fallback"], {
     error: "Seleccioná un modo de datos",
+  }),
+  targetTicketBand: z.enum(offerTicketBandValues, {
+    error: "Seleccioná un ticket objetivo",
   }),
 });
 
@@ -140,6 +144,7 @@ export async function createCampaignSubmission(
       name: stringValue(formData, "name"),
       targetDailyEmails: stringValue(formData, "targetDailyEmails"),
       paidDataMode: stringValue(formData, "paidDataMode"),
+      targetTicketBand: stringValue(formData, "targetTicketBand"),
     });
     if (!parsed.success) {
       return {

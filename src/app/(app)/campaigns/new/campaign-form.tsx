@@ -4,6 +4,7 @@ import { useActionState } from "react";
 
 import { initialActionState } from "@/features/app/action-state";
 import { createCampaignAction } from "@/features/campaigns/campaign-actions";
+import type { OfferTicketBand } from "@/features/offers/offer-schema";
 
 function FieldError({
   errors,
@@ -36,7 +37,13 @@ function fieldErrorProps(
     : {};
 }
 
-export function CampaignForm({ offerId }: { offerId: string }) {
+export function CampaignForm({
+  offerId,
+  defaultTargetTicketBand,
+}: {
+  offerId: string;
+  defaultTargetTicketBand: OfferTicketBand;
+}) {
   const [state, action, pending] = useActionState(
     createCampaignAction,
     initialActionState,
@@ -74,6 +81,22 @@ export function CampaignForm({ offerId }: { offerId: string }) {
         <FieldError
           errors={state.fieldErrors}
           name="targetDailyEmails"
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="targetTicketBand">Ticket objetivo</label>
+        <select
+          {...fieldErrorProps(state.fieldErrors, "targetTicketBand")}
+          defaultValue={defaultTargetTicketBand}
+          id="targetTicketBand"
+          name="targetTicketBand"
+        >
+          <option value="usd_5k_15k">USD 5k–15k</option>
+          <option value="usd_15k_plus">USD 15k+</option>
+        </select>
+        <FieldError
+          errors={state.fieldErrors}
+          name="targetTicketBand"
         />
       </div>
       <div className="field">

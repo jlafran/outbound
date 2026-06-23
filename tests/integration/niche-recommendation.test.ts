@@ -22,6 +22,7 @@ const campaignInput: CreateCampaignInput = {
   name: "Argentina outbound",
   targetDailyEmails: 25,
   paidDataMode: "fallback",
+  targetTicketBand: "usd_15k_plus",
 };
 
 async function createCampaignHarness(
@@ -255,6 +256,63 @@ describe("CampaignService niche recommendations", () => {
         },
       },
     ]);
+  });
+
+  it("uses each campaign target ticket for recommendation and recovery without mutating the offer", async () => {
+    const advisedOffers: NormalizedOffer[] = [];
+    const fakeAdvisor = new FakeNicheAdvisor();
+    const advisor: NicheAdvisor = {
+      async recommend(offer) {
+        advisedOffers.push(structuredClone(offer));
+        return fakeAdvisor.recommend(offer);
+      },
+    };
+    const { offerRepository, service } = await createCampaignHarness(
+      {},
+      advisor,
+    );
+    const lowerTicketCampaign = await service.create({
+      ...campaignInput,
+      targetTicketBand: "usd_5k_15k",
+    });
+    const higherTicketCampaign = await service.create({
+      ...campaignInput,
+      name: "Argentina enterprise",
+      targetTicketBand: "usd_15k_plus",
+    });
+
+    await service.recommendNiches(
+      lowerTicketCampaign.workspaceId,
+      lowerTicketCampaign.id,
+      "user-1",
+      lowerTicketCampaign.version,
+    );
+    await service.recommendNiches(
+      higherTicketCampaign.workspaceId,
+      higherTicketCampaign.id,
+      "user-1",
+      higherTicketCampaign.version,
+    );
+    await service.recoverNicheRecommendations(
+      lowerTicketCampaign.workspaceId,
+      lowerTicketCampaign.id,
+    );
+    await service.recoverNicheRecommendations(
+      higherTicketCampaign.workspaceId,
+      higherTicketCampaign.id,
+    );
+
+    expect(advisedOffers.map(({ ticketBand }) => ticketBand)).toEqual([
+      "usd_5k_15k",
+      "usd_15k_plus",
+      "usd_5k_15k",
+      "usd_15k_plus",
+    ]);
+    await expect(
+      offerRepository.getById("workspace-1", "offer-1"),
+    ).resolves.toMatchObject({
+      ticketBand: normalizedOffer.ticketBand,
+    });
   });
 
   it("recovers validated recommendations without mutation or audit", async () => {

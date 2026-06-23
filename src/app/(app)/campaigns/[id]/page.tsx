@@ -39,6 +39,12 @@ export default async function CampaignPage({
           {campaign.targetDailyEmails} emails diarios · datos{" "}
           {campaign.paidDataMode}
         </p>
+        <p>
+          Ticket objetivo:{" "}
+          {campaign.targetTicketBand === "usd_15k_plus"
+            ? "USD 15k+"
+            : "USD 5k–15k"}
+        </p>
       </div>
       <section className="workflow" aria-label="Flujo de campaña">
         {campaign.state === "discovery_ready" ? (

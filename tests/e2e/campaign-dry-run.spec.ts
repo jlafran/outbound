@@ -94,10 +94,19 @@ test("creates an offer and completes a campaign dry-run", async ({
     .fill("Argentina operaciones");
   await page.getByLabel("Emails diarios").fill("50");
   await page.getByLabel("Modo de datos").selectOption("fallback");
+  await expect(page.getByLabel("Ticket objetivo")).toHaveValue(
+    "usd_15k_plus",
+  );
+  await page
+    .getByLabel("Ticket objetivo")
+    .selectOption("usd_5k_15k");
   await page.getByRole("button", { name: "Guardar campaña" }).click();
 
   await expect(
     page.getByRole("heading", { name: "Argentina operaciones" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Ticket objetivo: USD 5k–15k"),
   ).toBeVisible();
   await page.getByRole("button", { name: "Recomendar nichos" }).click();
 

@@ -24,6 +24,7 @@ import {
 import { createMemoryCampaignUnitOfWork } from "@/features/campaigns/campaign-unit-of-work";
 import { FakeNicheAdvisor } from "@/features/niches/fake-niche-advisor";
 import { createMemoryOfferRepository } from "@/features/offers/offer-repository";
+import { offerTicketBandValues } from "@/features/offers/offer-schema";
 import { normalizedOffer } from "../fixtures/offer";
 
 const validCreateInput: CreateCampaignInput = {
@@ -33,6 +34,7 @@ const validCreateInput: CreateCampaignInput = {
   name: "Argentina SaaS",
   targetDailyEmails: 25,
   paidDataMode: "fallback",
+  targetTicketBand: "usd_5k_15k",
 };
 
 async function createHarness() {
@@ -105,6 +107,7 @@ describe("CampaignService", () => {
       name: "Argentina SaaS",
       targetDailyEmails: 25,
       paidDataMode: "fallback",
+      targetTicketBand: "usd_5k_15k",
       state: "draft",
       nicheRecommendationIds: [],
       approvedNicheIds: [],
@@ -122,6 +125,20 @@ describe("CampaignService", () => {
 
       await expect(
         createDraft(service, { targetDailyEmails }),
+      ).rejects.toEqual(expectCode("INVALID_CAMPAIGN_INPUT"));
+    },
+  );
+
+  it.each([undefined, "usd_50k_plus"])(
+    "rejects invalid target ticket band %s",
+    async (targetTicketBand) => {
+      const { service } = await createHarness();
+
+      await expect(
+        service.create({
+          ...validCreateInput,
+          targetTicketBand,
+        } as CreateCampaignInput),
       ).rejects.toEqual(expectCode("INVALID_CAMPAIGN_INPUT"));
     },
   );
@@ -786,9 +803,16 @@ describe("campaign schema", () => {
       "completed",
     ]);
     expect(paidDataModeValues).toEqual(["free", "paid", "fallback"]);
+    expect(offerTicketBandValues).toEqual([
+      "usd_5k_15k",
+      "usd_15k_plus",
+    ]);
     expect(campaigns.state.enumValues).toEqual(campaignStateValues);
     expect(campaigns.paidDataMode.enumValues).toEqual(
       paidDataModeValues,
+    );
+    expect(campaigns.targetTicketBand.enumValues).toEqual(
+      offerTicketBandValues,
     );
   });
 
@@ -867,6 +891,7 @@ function createCampaignRecord(
     name: "Argentina SaaS",
     targetDailyEmails: 25,
     paidDataMode: "fallback",
+    targetTicketBand: "usd_5k_15k",
     state: "draft",
     nicheRecommendationIds: [],
     approvedNicheIds: [],

@@ -31,6 +31,21 @@ async function createMigratedDatabase(): Promise<PGlite> {
 }
 
 async function seedBaseRecords(database: PGlite) {
+  const targetTicketColumn = await database.query<{ exists: boolean }>(
+    `select exists (
+      select 1
+      from information_schema.columns
+      where table_name = 'campaigns'
+        and column_name = 'target_ticket_band'
+    ) as exists`,
+  );
+  const campaignTicketColumn = targetTicketColumn.rows[0]?.exists
+    ? ", target_ticket_band"
+    : "";
+  const campaignTicketValue = targetTicketColumn.rows[0]?.exists
+    ? ", 'usd_5k_15k'"
+    : "";
+
   await database.exec(`
     insert into users (id, email, name, created_at)
     values ('user-1', 'user-1@example.com', 'User One', now());
@@ -50,10 +65,11 @@ async function seedBaseRecords(database: PGlite) {
     insert into campaigns (
       id, workspace_id, offer_id, created_by, name, target_daily_emails,
       paid_data_mode, state, niche_recommendation_ids, approved_niche_ids,
-      version, created_at, updated_at
+      version, created_at, updated_at${campaignTicketColumn}
     ) values (
       'campaign-1', 'workspace-1', 'offer-1', 'user-1', 'Campaign', 20,
       'free', 'draft', '[]'::jsonb, '[]'::jsonb, 1, now(), now()
+      ${campaignTicketValue}
     );
   `);
 }
@@ -143,7 +159,13 @@ describe("dossier PostgreSQL migrations", () => {
     await upgradeDatabase.waitReady;
 
     try {
-      await applyMigrations(upgradeDatabase, migrationNames.slice(0, -1));
+      const dossierMigrationIndex = migrationNames.indexOf(
+        "0010_amusing_the_anarchist.sql",
+      );
+      await applyMigrations(
+        upgradeDatabase,
+        migrationNames.slice(0, dossierMigrationIndex),
+      );
       await seedBaseRecords(upgradeDatabase);
       await seedCampaignCompany(upgradeDatabase, "upgrade-chain");
       await upgradeDatabase.exec(`
@@ -175,7 +197,9 @@ describe("dossier PostgreSQL migrations", () => {
         );
       `);
 
-      await applyMigrations(upgradeDatabase, migrationNames.slice(-1));
+      await applyMigrations(upgradeDatabase, [
+        migrationNames[dossierMigrationIndex],
+      ]);
 
       const result = await upgradeDatabase.query<{
         version: number;

@@ -17,7 +17,7 @@ import {
   paidDataModeValues,
 } from "@/features/campaigns/campaign-schema";
 
-import { offers } from "./offers";
+import { offers, offerTicketBand } from "./offers";
 import { workspaceMembers, workspaces } from "./workspaces";
 
 export const campaignState = pgEnum(
@@ -41,6 +41,7 @@ export const campaigns = pgTable(
     name: text("name").notNull(),
     targetDailyEmails: integer("target_daily_emails").notNull(),
     paidDataMode: campaignPaidDataMode("paid_data_mode").notNull(),
+    targetTicketBand: offerTicketBand("target_ticket_band").notNull(),
     state: campaignState("state").notNull(),
     nicheRecommendationIds: jsonb("niche_recommendation_ids")
       .$type<string[]>()
