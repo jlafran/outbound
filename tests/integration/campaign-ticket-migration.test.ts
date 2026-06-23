@@ -8,6 +8,7 @@ const drizzleDirectory = join(process.cwd(), "drizzle");
 const migrationNames = readdirSync(drizzleDirectory)
   .filter((name) => /^\d{4}_.+\.sql$/.test(name))
   .sort();
+const targetTicketMigrationName = "0011_campaign_target_ticket.sql";
 
 async function applyMigrations(database: PGlite, names: string[]) {
   for (const migrationName of names) {
@@ -54,9 +55,18 @@ describe("campaign target ticket migration", () => {
     await database.waitReady;
 
     try {
-      await applyMigrations(database, migrationNames.slice(0, -1));
+      const targetTicketMigrationIndex = migrationNames.indexOf(
+        targetTicketMigrationName,
+      );
+      expect(targetTicketMigrationIndex).toBeGreaterThan(0);
+      await applyMigrations(
+        database,
+        migrationNames.slice(0, targetTicketMigrationIndex),
+      );
       await seedCampaignBeforeTargetTicket(database);
-      await applyMigrations(database, migrationNames.slice(-1));
+      await applyMigrations(database, [
+        migrationNames[targetTicketMigrationIndex],
+      ]);
 
       const result = await database.query<{
         target_ticket_band: string;
