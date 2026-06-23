@@ -1,12 +1,14 @@
 # Progreso de implementación — Fase 1
 
-Última actualización: 20 de junio de 2026  
-Rama: `codex/outreach-phase-1`  
+Última actualización: 23 de junio de 2026
+
+Rama: `codex/outreach-phase-1`
+
 Worktree: `/Users/juancruzlafranconi/Documents/Outreach/.worktrees/outreach-phase-1`
 
 ## Estado
 
-Completadas y aprobadas:
+Fase 1 completa. Tareas 1–15 implementadas:
 
 1. Scaffold y controles de calidad.
 2. Workspace y auditoría.
@@ -16,9 +18,6 @@ Completadas y aprobadas:
 6. Base central de empresas y research.
 7. Scoring reproducible.
 8. Dataset dry-run.
-
-Pendientes:
-
 9. Servicio de dossier.
 10. Exportación Markdown.
 11. Exportación PDF.
@@ -27,14 +26,9 @@ Pendientes:
 14. Autenticación y aislamiento.
 15. Verificación integral.
 
-## Línea base verificada
+## Estado de verificación
 
-- 160 pruebas automatizadas pasan.
-- ESLint pasa.
-- TypeScript pasa.
-- Build de producción pasa.
-- Drizzle schema check pasa.
-- Worktree limpio antes de este documento.
+Las tareas funcionales y sus correcciones fueron verificadas durante la implementación. Este checkpoint no inventa ni reutiliza un conteo histórico como evidencia de release: antes de publicar, ejecutar una verificación fresca de lint, TypeScript, Vitest, smoke PDF con Chromium real, Playwright E2E y build de producción.
 
 ## Decisiones implementadas
 
@@ -52,6 +46,12 @@ Pendientes:
 - Base central de empresas con deduplicación, aislamiento por workspace e integridad entre fuentes, evidencia, campañas y ofertas.
 - Scoring de empresas reproducible y explicable.
 - Dataset dry-run con tres empresas argentinas ficticias, contactos corporativos, evidencia, hipótesis, estimaciones y scores.
+- Dossiers append-only con cadenas de versiones inmutables, edición con concurrencia optimista y etiquetas epistemológicas.
+- Exportaciones Markdown y PDF de la versión exacta del dossier; el smoke PDF exige Chromium real.
+- Dashboard autenticado con `workspaceId` y actor derivados de sesión, allowlist de emails y exactamente una membresía por usuario.
+- Google OAuth obligatorio en producción; credenciales compartidas disponibles solo en desarrollo.
+- El flujo fake completo vive en `OUTREACH_E2E_MODE=1`, es en memoria, está prohibido en producción y no produce efectos externos.
+- El modo persistente usa PostgreSQL, pero los proveedores reales de recomendaciones, discovery y research quedan deliberadamente fuera de Fase 1.
 
 ## Commits relevantes
 
@@ -65,22 +65,36 @@ Pendientes:
 - `266b94d` — seguridad de recomendaciones de nichos.
 - `a182104` — integridad de la base central de empresas.
 - `621cc3f` — scoring explicable de empresas.
+- `4715832` — research dry-run determinista.
+- `7f76e18` — dossiers versionados.
+- `326703f` — cadenas de dossier inmutables.
+- `f9fec3d` — exportación Markdown.
+- `d213889` — exportación PDF.
+- `245dacc` — smoke PDF obligatorio en CI.
+- `9d826c5` — dashboard de oferta y campaña.
+- `7450350` y `cc1c9e0` — dashboard editable del dossier.
+- `c1cc070` — autenticación y aislamiento del workspace.
+- `4e8d07f` y `387f86e` — endurecimiento final de autorización y sesiones.
 
 ## Próximo paso
 
-Implementar la Tarea 9: servicio de dossier versionado. Debe separar necesidades confirmadas, hechos investigados, hipótesis, estimaciones y recomendaciones, y preparar el modelo común que luego exportarán Markdown y PDF.
+Fase 2: integrar discovery, research y contactos reales detrás de los puertos existentes, manteniendo aislamiento por workspace, auditoría, revisión humana y límites explícitos de efectos externos.
 
-## Cómo retomar
+## Verificación previa a release
 
 1. Abrir el worktree indicado arriba.
 2. Confirmar que la rama es `codex/outreach-phase-1`.
 3. Ejecutar:
 
 ```bash
-pnpm test
+pnpm lint
 pnpm typecheck
+pnpm test
+pnpm test:pdf-smoke
+pnpm test:e2e
+pnpm build
 git status --short
 ```
 
-4. Continuar desde la Tarea 9 del plan:
-   `docs/superpowers/plans/2026-06-19-outreach-phase-1-foundation.md`.
+4. Seguir la operación y las limitaciones documentadas en
+   `docs/operations/phase-1-dry-run.md`.
