@@ -57,6 +57,8 @@ import {
   createMemoryOfferUnitOfWork,
 } from "@/features/offers/offer-unit-of-work";
 import { FakeResearchProvider } from "@/features/research/fake-research-provider";
+import { BraveSearchClient } from "@/features/research/brave-search-client";
+import { BraveResearchProvider } from "@/features/research/brave-research-provider";
 import type {
   ResearchCompany,
   ResearchProvider,
@@ -292,6 +294,18 @@ async function createProductionAppServices(): Promise<AppServices> {
     dossierUnitOfWork,
     createResearchSourceReader(researchRepository),
   );
+  const braveSearchApiKey = process.env.BRAVE_SEARCH_API_KEY?.trim();
+  const researchProvider: ResearchProvider = braveSearchApiKey
+    ? new BraveResearchProvider({
+        searchClient: new BraveSearchClient({
+          apiKey: braveSearchApiKey,
+        }),
+        campaignRepository,
+        offerRepository,
+        companyRepository,
+        researchRepository,
+      })
+    : new FakeResearchProvider(companyRepository, researchRepository);
 
   return composeServices({
     offerService: new OfferService(offerUnitOfWork),
@@ -309,10 +323,7 @@ async function createProductionAppServices(): Promise<AppServices> {
     auditRepository,
     nicheRecommendationProjection,
     campaignDryRunProjection,
-    researchProvider: new FakeResearchProvider(
-      companyRepository,
-      researchRepository,
-    ),
+    researchProvider,
   });
 }
 

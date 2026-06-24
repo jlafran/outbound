@@ -67,6 +67,7 @@ export async function recommendNichesAction(
   const result = await recommendNichesSubmission(resolved, formData);
   if (result.status === "success") {
     revalidatePath(`/campaigns/${result.campaignId}`);
+    redirect(`/campaigns/${result.campaignId}`);
   }
   return result;
 }
@@ -80,6 +81,7 @@ export async function moveToNicheReviewAction(
   const result = await moveToNicheReviewSubmission(resolved, formData);
   if (result.status === "success") {
     revalidatePath(`/campaigns/${result.campaignId}`);
+    redirect(`/campaigns/${result.campaignId}`);
   }
   return result;
 }
@@ -93,6 +95,7 @@ export async function approveNichesAction(
   const result = await approveNichesSubmission(resolved, formData);
   if (result.status === "success") {
     revalidatePath(`/campaigns/${result.campaignId}`);
+    redirect(`/campaigns/${result.campaignId}`);
   }
   return result;
 }
@@ -116,6 +119,7 @@ export async function generateDryRunAction(
   const result = await generateDryRunSubmission(resolved, formData);
   if (result.status === "success") {
     revalidatePath(`/campaigns/${result.campaignId}`);
+    redirect(`/campaigns/${result.campaignId}`);
   }
   return result;
 }

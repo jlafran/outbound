@@ -20,10 +20,11 @@ export default async function AppLayout({
   return (
     <div className="app-shell">
       <header className="app-header">
-        <Link className="brand" href="/offers/new">
+        <Link className="brand" href="/dashboard">
           Outreach
         </Link>
         <nav aria-label="Navegación principal">
+          <Link href="/dashboard">Guía</Link>
           <Link href="/offers/new">Nueva oferta</Link>
         </nav>
       </header>

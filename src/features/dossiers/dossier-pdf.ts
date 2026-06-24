@@ -295,9 +295,42 @@ export function createPdfDossierHandler({
       return dossierExportErrorResponse(404);
     }
 
-    try {
-      const pdf = await renderPdf(dossier);
+    const baseFilename = `dossier-${campaignCompanySlug(
+      dossier.campaignCompanyId,
+    )}-v${dossier.version}`;
 
+    let pdf: Buffer;
+    try {
+      pdf = await renderPdf(dossier);
+    } catch {
+      try {
+        await auditRepository.append({
+          workspaceId: requestContext.workspaceId,
+          actorId: requestContext.actorId,
+          action: "dossier.exported",
+          entityId: dossier.id,
+          metadata: {
+            format: "pdf_html_fallback",
+            dossierId: dossier.id,
+            campaignCompanyId: dossier.campaignCompanyId,
+            version: dossier.version,
+          },
+        });
+      } catch {
+        return dossierExportErrorResponse(500);
+      }
+
+      return new Response(renderDossierHtml(dossier), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Disposition": `inline; filename="${baseFilename}.html"`,
+          "X-Dossier-PDF-Fallback": "html",
+        },
+      });
+    }
+
+    try {
       await auditRepository.append({
         workspaceId: requestContext.workspaceId,
         actorId: requestContext.actorId,
@@ -310,17 +343,13 @@ export function createPdfDossierHandler({
           version: dossier.version,
         },
       });
-
-      const filename = `dossier-${campaignCompanySlug(
-        dossier.campaignCompanyId,
-      )}-v${dossier.version}.pdf`;
       const body = new Uint8Array(pdf);
 
       return new Response(body, {
         status: 200,
         headers: {
           "Content-Type": "application/pdf",
-          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Disposition": `attachment; filename="${baseFilename}.pdf"`,
           "Content-Length": String(body.byteLength),
         },
       });

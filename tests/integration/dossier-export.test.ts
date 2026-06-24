@@ -1052,44 +1052,76 @@ describe("createPdfDossierHandler", () => {
     expect(disposition?.length).toBeLessThanOrEqual(111);
   });
 
-  it.each(["render", "audit"])(
-    "returns 500 without a PDF document when %s fails",
-    async (failure) => {
-      const auditRepository: AuditRepository =
-        failure === "audit"
-          ? {
-              async append() {
-                throw new Error("sensitive audit failure");
-              },
-              async list() {
-                return [];
-              },
-            }
-          : createMemoryAuditRepository();
-      const renderPdf =
-        failure === "render"
-          ? vi.fn().mockRejectedValue(new Error("sensitive PDF failure"))
-          : vi.fn().mockResolvedValue(Buffer.from("%PDF-secret"));
-      const { handler } = createPdfRouteHandler({
+  it("returns printable HTML fallback when PDF rendering fails", async () => {
+    const auditRepository = createMemoryAuditRepository();
+    const renderPdf = vi
+      .fn()
+      .mockRejectedValue(new Error("sensitive PDF failure"));
+    const { handler } = createPdfRouteHandler({
+      workspaceId: "workspace-1",
+      auditRepository,
+      renderPdf,
+    });
+
+    const response = await handler(createPdfRequest(), {
+      params: Promise.resolve({ id: "dossier-1" }),
+    });
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe(
+      "text/html; charset=utf-8",
+    );
+    expect(response.headers.get("Content-Disposition")).toBe(
+      'inline; filename="dossier-campaign-company-1-v3.html"',
+    );
+    expect(response.headers.get("X-Dossier-PDF-Fallback")).toBe("html");
+    expect(body).toContain("<title>Dossier previo a la reunión</title>");
+    expect(body).not.toContain("sensitive");
+    expect(await auditRepository.list("workspace-1")).toEqual([
+      {
         workspaceId: "workspace-1",
-        auditRepository,
-        renderPdf,
-      });
+        actorId: "user-1",
+        action: "dossier.exported",
+        entityId: "dossier-1",
+        metadata: {
+          format: "pdf_html_fallback",
+          dossierId: "dossier-1",
+          campaignCompanyId: "campaign-company-1",
+          version: 3,
+        },
+      },
+    ]);
+  });
 
-      const response = await handler(createPdfRequest(), {
-        params: Promise.resolve({ id: "dossier-1" }),
-      });
-      const body = await response.text();
+  it("returns 500 without a PDF document when audit fails", async () => {
+    const auditRepository: AuditRepository = {
+      async append() {
+        throw new Error("sensitive audit failure");
+      },
+      async list() {
+        return [];
+      },
+    };
+    const renderPdf = vi.fn().mockResolvedValue(Buffer.from("%PDF-secret"));
+    const { handler } = createPdfRouteHandler({
+      workspaceId: "workspace-1",
+      auditRepository,
+      renderPdf,
+    });
 
-      expect(response.status).toBe(500);
-      expect(response.headers.get("Content-Type")).not.toBe(
-        "application/pdf",
-      );
-      expect(body).not.toContain("%PDF");
-      expect(body).not.toContain("sensitive");
-      expect(await auditRepository.list("workspace-1")).toEqual([]);
-    },
-  );
+    const response = await handler(createPdfRequest(), {
+      params: Promise.resolve({ id: "dossier-1" }),
+    });
+    const body = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("Content-Type")).not.toBe(
+      "application/pdf",
+    );
+    expect(body).not.toContain("%PDF");
+    expect(body).not.toContain("sensitive");
+  });
 });
 
 describe("Markdown dossier production route", () => {

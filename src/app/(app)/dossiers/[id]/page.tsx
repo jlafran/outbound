@@ -161,7 +161,7 @@ export default async function DossierPage({
             className="button-link secondary-link"
             href={`/api/dossiers/${dossier.id}/pdf`}
           >
-            Exportar PDF
+            Abrir PDF / imprimible
           </a>
         </div>
       </div>

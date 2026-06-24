@@ -182,7 +182,7 @@ test("creates an offer and completes a campaign dry-run", async ({
   const markdownV1 = page.getByRole("link", {
     name: "Exportar Markdown",
   });
-  const pdfV1 = page.getByRole("link", { name: "Exportar PDF" });
+  const pdfV1 = page.getByRole("link", { name: "Abrir PDF / imprimible" });
   await expect(markdownV1).toHaveAttribute(
     "href",
     /\/api\/dossiers\/[^/]+\/markdown$/,
@@ -219,7 +219,7 @@ test("creates an offer and completes a campaign dry-run", async ({
     page.getByRole("link", { name: "Exportar Markdown" }),
   ).toHaveAttribute("href", `/api/dossiers/${versionTwoId}/markdown`);
   await expect(
-    page.getByRole("link", { name: "Exportar PDF" }),
+    page.getByRole("link", { name: "Abrir PDF / imprimible" }),
   ).toHaveAttribute("href", `/api/dossiers/${versionTwoId}/pdf`);
 
   const markdownResponse = await page.request.get(
@@ -255,7 +255,7 @@ test("creates an offer and completes a campaign dry-run", async ({
 
   const [pdfDownload] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("link", { name: "Exportar PDF" }).click(),
+    page.getByRole("link", { name: "Abrir PDF / imprimible" }).click(),
   ]);
   const pdfPath = await pdfDownload.path();
   expect(pdfPath).not.toBeNull();

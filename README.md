@@ -31,6 +31,7 @@ cp .env.example .env.local
 | `ALLOWED_EMAILS` | Comma-separated, case-insensitive allowlist. A user must also exist in the database with exactly one workspace membership. |
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID. Required in production. |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret. Required in production. |
+| `BRAVE_SEARCH_API_KEY` | Optional Brave Search API key. When present in production, campaign dry-runs use Brave-backed company discovery; otherwise they keep deterministic fake data. |
 | `DEV_AUTH_PASSWORD` | Shared development-only credential, at least 12 characters. Credentials auth is disabled in production. |
 | `OUTREACH_E2E_MODE` | Set to `1` only for local/test dry-runs. It bypasses normal auth, uses deterministic in-memory services, and is rejected in production. Never configure it in production. |
 
