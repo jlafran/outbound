@@ -111,15 +111,19 @@ describe("BraveResearchProvider", () => {
     });
 
     expect(searchClient.searchWeb).toHaveBeenCalledWith({
-      query:
-        "empresas logistica argentina B2B USD 15k+ prospección manual lenta",
+      query: "empresas logistica argentina B2B USD 15k+",
       count: 10,
       country: "AR",
       searchLang: "es",
     });
     expect(searchClient.searchWeb).toHaveBeenCalledWith({
-      query:
-        "empresas software b2b argentina B2B USD 15k+ prospección manual lenta",
+      query: '"logistica" "Argentina" "contacto" "empresa"',
+      count: 10,
+      country: "AR",
+      searchLang: "es",
+    });
+    expect(searchClient.searchWeb).toHaveBeenCalledWith({
+      query: "empresas software b2b argentina B2B USD 15k+",
       count: 10,
       country: "AR",
       searchLang: "es",
@@ -131,6 +135,7 @@ describe("BraveResearchProvider", () => {
     const searchClient: BraveResearchSearchClient = {
       searchWeb: vi
         .fn()
+        .mockResolvedValue([])
         .mockResolvedValueOnce([
           {
             title: "ACME Logística",
@@ -188,5 +193,46 @@ describe("BraveResearchProvider", () => {
         campaignId: "campaign-1",
       }),
     ).resolves.toHaveLength(2);
+  });
+
+  it("filters content and article results before saving companies", async () => {
+    const searchClient: BraveResearchSearchClient = {
+      searchWeb: vi
+        .fn()
+        .mockResolvedValue([])
+        .mockResolvedValueOnce([
+          {
+            title:
+              "B2B: Los principales dolores en logística y cómo solucionarlos",
+            url: "https://beetrack.com/blog/dolores-logistica-b2b",
+            description: "Artículo SEO sobre logística.",
+            domain: "beetrack.com",
+          },
+          {
+            title:
+              "Logística y servicio: el verdadero diferencial en empresas B2B",
+            url: "https://infobae.com/economia/logistica-servicio",
+            description: "Nota de medio.",
+            domain: "infobae.com",
+          },
+          {
+            title: "Esa Logística",
+            url: "https://esalogistica.com.ar/contacto",
+            description: "Logística y distribución para empresas.",
+            domain: "esalogistica.com.ar",
+          },
+        ]),
+    };
+    const { provider } = await createProvider({ searchClient });
+
+    const result = await provider.researchCampaign({
+      workspaceId: "workspace-1",
+      campaignId: "campaign-1",
+      offerId: "offer-1",
+    });
+
+    expect(result.companies.map(({ domain }) => domain)).toEqual([
+      "esalogistica.com.ar",
+    ]);
   });
 });

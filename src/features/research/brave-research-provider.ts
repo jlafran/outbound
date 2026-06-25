@@ -39,6 +39,39 @@ const nicheNames: Record<string, string> = {
   "salud-privada-ar": "salud privada",
 };
 
+const contentDomains = new Set([
+  "beetrack.com",
+  "ecosistemastartup.com",
+  "infobae.com",
+  "prospectfactory.com.mx",
+  "revistafactordeexito.com",
+  "transeop.com",
+]);
+
+const contentTitlePatterns = [
+  /\bb2b:\s/i,
+  /\bautomatizar prospecci[oó]n\b/i,
+  /\bclaves?\b/i,
+  /\bc[oó]mo\b/i,
+  /\bdolores?\b/i,
+  /\berrores?\b/i,
+  /\bgu[ií]a\b/i,
+  /\bqu[eé] es\b/i,
+  /\bprincipales\b/i,
+];
+
+const contentPathPatterns = [
+  /\/blog\b/i,
+  /\/blogs\b/i,
+  /\/guia/i,
+  /\/noticia/i,
+  /\/news\b/i,
+  /\/articulo/i,
+  /\/article/i,
+  /\/que-es/i,
+  /\/errores/i,
+];
+
 function createCampaignCompanyId(
   workspaceId: string,
   campaignId: string,
@@ -61,6 +94,35 @@ function cleanTitle(value: string): string {
     .replace(/\s[|·-]\s.*$/, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function isContentResult(result: BraveSearchResult): boolean {
+  if (contentDomains.has(result.domain)) {
+    return true;
+  }
+  if (contentTitlePatterns.some((pattern) => pattern.test(result.title))) {
+    return true;
+  }
+  try {
+    const pathname = new URL(result.url).pathname;
+    return contentPathPatterns.some((pattern) => pattern.test(pathname));
+  } catch {
+    return true;
+  }
+}
+
+function buildQueries(input: {
+  niche: string;
+  targetTicket: string;
+  problem: string;
+}): string[] {
+  return [
+    `empresas ${input.niche} argentina B2B ${input.targetTicket}`,
+    `"${input.niche}" "Argentina" "contacto" "empresa"`,
+    `"${input.niche}" "Argentina" "soluciones" "clientes"`,
+    `site:.com.ar ${input.niche} empresa argentina contacto`,
+    `site:.com.ar ${input.niche} ${input.problem}`,
+  ];
 }
 
 export class BraveResearchProvider implements ResearchProvider {
@@ -100,87 +162,95 @@ export class BraveResearchProvider implements ResearchProvider {
     for (const nicheId of approvedNiches) {
       if (companies.length >= this.maxCompanies) break;
       const niche = nicheNames[nicheId] ?? nicheId.replaceAll("-", " ");
-      const query = `empresas ${niche} argentina B2B ${
+      const targetTicket =
         campaign.targetTicketBand === "usd_15k_plus"
           ? "USD 15k+"
-          : "USD 5k-15k"
-      } ${firstProblem(offer.problems[0])}`;
-      const results = await this.options.searchClient.searchWeb({
-        query,
-        count: 10,
-        country: "AR",
-        searchLang: "es",
+          : "USD 5k-15k";
+      const queries = buildQueries({
+        niche,
+        targetTicket,
+        problem: firstProblem(offer.problems[0]),
       });
 
-      for (const result of results) {
+      for (const query of queries) {
         if (companies.length >= this.maxCompanies) break;
-        if (seen.has(result.domain)) continue;
-        seen.add(result.domain);
-
-        const company = await this.options.companyRepository.upsertByDomain({
-          workspaceId: input.workspaceId,
-          domain: result.domain,
-          name: cleanTitle(result.title) || result.domain,
+        const results = await this.options.searchClient.searchWeb({
+          query,
+          count: 10,
+          country: "AR",
+          searchLang: "es",
         });
-        const description = result.description || result.title;
 
-        companies.push({
-          companyId: company.id,
-          campaignCompanyId: createCampaignCompanyId(
-            input.workspaceId,
-            input.campaignId,
-            company.normalizedDomain,
-          ),
-          name: company.name,
-          domain: company.normalizedDomain,
-          contacts: [
-            {
-              name: "Contacto comercial",
-              role: "Área comercial",
-              corporateEmail: `contacto@${company.normalizedDomain}`,
-            },
-          ],
-          evidence: [
-            {
-              kind: "researched_fact",
-              statement: description,
-              sourceUrl: result.url,
-              observedAt: this.now(),
-              confidence: "medium",
-              assumptions: [],
-            },
-            {
-              kind: "hypothesis",
-              statement: `La empresa podría beneficiarse de ${offer.name} si hoy resuelve ${firstProblem(
-                offer.problems[0],
-              )} de forma manual.`,
-              observedAt: this.now(),
-              confidence: "low",
-              assumptions: [
-                "La hipótesis se basa en el resultado de búsqueda y debe validarse antes de contactar.",
-              ],
-            },
-            {
-              kind: "estimate",
-              statement:
-                "La oportunidad requiere validación humana antes de enviar outreach.",
-              observedAt: this.now(),
-              confidence: "low",
-              assumptions: [
-                "No se enriquecieron contactos pagos ni se verificó email en este v0.",
-              ],
-            },
-          ],
-          score: scoreCompany({
-            capacityToPay:
-              campaign.targetTicketBand === "usd_15k_plus" ? 82 : 70,
-            problemMagnitude: 78,
-            urgency: 70,
-            solutionFit: 76,
-            decisionMakerAccess: 55,
-            evidenceConfidence: 62,
-          }),
-        });
+        for (const result of results) {
+          if (companies.length >= this.maxCompanies) break;
+          if (seen.has(result.domain) || isContentResult(result)) continue;
+          seen.add(result.domain);
+
+          const company = await this.options.companyRepository.upsertByDomain({
+            workspaceId: input.workspaceId,
+            domain: result.domain,
+            name: cleanTitle(result.title) || result.domain,
+          });
+          const description = result.description || result.title;
+
+          companies.push({
+            companyId: company.id,
+            campaignCompanyId: createCampaignCompanyId(
+              input.workspaceId,
+              input.campaignId,
+              company.normalizedDomain,
+            ),
+            name: company.name,
+            domain: company.normalizedDomain,
+            contacts: [
+              {
+                name: "Contacto comercial",
+                role: "Área comercial",
+                corporateEmail: `contacto@${company.normalizedDomain}`,
+              },
+            ],
+            evidence: [
+              {
+                kind: "researched_fact",
+                statement: description,
+                sourceUrl: result.url,
+                observedAt: this.now(),
+                confidence: "medium",
+                assumptions: [],
+              },
+              {
+                kind: "hypothesis",
+                statement: `La empresa podría beneficiarse de ${offer.name} si hoy resuelve ${firstProblem(
+                  offer.problems[0],
+                )} de forma manual.`,
+                observedAt: this.now(),
+                confidence: "low",
+                assumptions: [
+                  "La hipótesis se basa en el resultado de búsqueda y debe validarse antes de contactar.",
+                ],
+              },
+              {
+                kind: "estimate",
+                statement:
+                  "La oportunidad requiere validación humana antes de enviar outreach.",
+                observedAt: this.now(),
+                confidence: "low",
+                assumptions: [
+                  "No se enriquecieron contactos pagos ni se verificó email en este v0.",
+                ],
+              },
+            ],
+            score: scoreCompany({
+              capacityToPay:
+                campaign.targetTicketBand === "usd_15k_plus" ? 82 : 70,
+              problemMagnitude: 78,
+              urgency: 70,
+              solutionFit: 76,
+              decisionMakerAccess: 55,
+              evidenceConfidence: 62,
+            }),
+          });
+        }
       }
     }
 
