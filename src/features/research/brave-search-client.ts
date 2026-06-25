@@ -10,6 +10,7 @@ export type BraveSearchInput = {
   count: number;
   country?: string;
   searchLang?: string;
+  includeKnownPlatforms?: boolean;
 };
 
 export class BraveSearchError extends Error {
@@ -48,13 +49,21 @@ const ignoredDomains = new Set([
   "youtube.com",
 ]);
 
-function normalizeDomain(value: string): string | null {
+function normalizeDomain(
+  value: string,
+  options: { includeKnownPlatforms?: boolean } = {},
+): string | null {
   try {
     const hostname = new URL(value).hostname
       .toLowerCase()
       .replace(/^www\./, "");
     if (!hostname.includes(".")) return null;
-    if ([...ignoredDomains].some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) {
+    if (
+      !options.includeKnownPlatforms &&
+      [...ignoredDomains].some(
+        (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
+      )
+    ) {
       return null;
     }
     return hostname;
@@ -107,7 +116,9 @@ export class BraveSearchClient {
       ) {
         continue;
       }
-      const domain = normalizeDomain(result.url);
+      const domain = normalizeDomain(result.url, {
+        includeKnownPlatforms: input.includeKnownPlatforms,
+      });
       if (!domain || seen.has(domain)) continue;
       seen.add(domain);
       normalized.push({

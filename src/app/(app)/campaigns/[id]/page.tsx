@@ -50,6 +50,11 @@ export default async function CampaignPage({
         {campaign.state === "discovery_ready" ? (
           <h2>Lista para discovery</h2>
         ) : null}
+        <p>
+          <Link href={`/campaigns/${campaign.id}/prospecting-test`}>
+            Abrir test de prospección real odontología/estética
+          </Link>
+        </p>
         <CampaignWorkflow
           campaign={campaign}
           recommendations={recommendations}

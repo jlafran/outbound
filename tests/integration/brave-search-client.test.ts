@@ -92,6 +92,40 @@ describe("BraveSearchClient", () => {
     ]);
   });
 
+  it("can keep known platforms when a people-search flow needs public profiles", async () => {
+    const client = new BraveSearchClient({
+      apiKey: "key",
+      fetcher: vi.fn().mockResolvedValue(
+        createResponse({
+          web: {
+            results: [
+              {
+                title: "Dra. María López - Directora",
+                url: "https://www.linkedin.com/in/maria-lopez-odontologia",
+                description: "Directora odontológica en Clínica Palermo.",
+              },
+            ],
+          },
+        }),
+      ),
+    });
+
+    await expect(
+      client.searchWeb({
+        query: "site:linkedin.com/in clínica directora",
+        count: 10,
+        includeKnownPlatforms: true,
+      }),
+    ).resolves.toEqual([
+      {
+        title: "Dra. María López - Directora",
+        url: "https://www.linkedin.com/in/maria-lopez-odontologia",
+        description: "Directora odontológica en Clínica Palermo.",
+        domain: "linkedin.com",
+      },
+    ]);
+  });
+
   it("throws a non-secret error for non-success responses", async () => {
     const client = new BraveSearchClient({
       apiKey: "very-secret-token",
