@@ -349,7 +349,10 @@ export function createDrizzleResearchRepository(
           ),
         );
       const sourceUrlById = new Map(
-        sourceRows.map((source) => [source.id, source.url]),
+        sourceRows.map((source) => [
+          source.id,
+          source.url.trim().length > 0 ? source.url : undefined,
+        ]),
       );
 
       const evidenceRows = await database

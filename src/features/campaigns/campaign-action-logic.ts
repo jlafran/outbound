@@ -381,13 +381,22 @@ export async function generateDryRunSubmission(
         fieldErrors: zodFieldErrors(parsed.error),
       };
     }
-    const generated =
-      await dependencies.services.campaignDryRunService.generate({
+    let generated;
+    try {
+      generated = await dependencies.services.campaignDryRunService.generate({
         workspaceId: context.workspaceId,
         actorId: context.actorId,
         campaignId: parsed.data.campaignId,
         expectedVersion: parsed.data.expectedVersion,
       });
+    } catch (error) {
+      console.error("Failed to generate campaign dry-run", {
+        campaignId: parsed.data.campaignId,
+        expectedVersion: parsed.data.expectedVersion,
+        error,
+      });
+      throw error;
+    }
     return {
       status: "success",
       campaignId: generated.campaignId,

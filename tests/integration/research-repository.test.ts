@@ -14,6 +14,7 @@ import {
   createDrizzleResearchRepository,
   type ResearchDbExecutor,
 } from "@/features/research/research-repository";
+import { scoreCompany } from "@/features/research/score-company";
 
 async function createMigratedDatabase() {
   const client = new PGlite();
@@ -230,6 +231,84 @@ describe("createDrizzleResearchRepository", () => {
             status: "candidate",
           }),
         ],
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("returns undefined sourceUrl for evidence persisted without a URL", async () => {
+    const { client, database } = await createMigratedDatabase();
+    try {
+      await seedCampaignScope(client);
+      const companyRepository = createDrizzleCompanyRepository(
+        createDrizzleCompanyPersistenceExecutor(
+          database as unknown as CompanyDbExecutor,
+        ),
+        {
+          createId: () => "company-without-source-url",
+          now: () => new Date("2026-06-20T12:00:00.000Z"),
+        },
+      );
+      const company = await companyRepository.upsertByDomain({
+        workspaceId: "workspace-1",
+        name: "Empresa con hipótesis sin fuente",
+        domain: "empresa.com.ar",
+      });
+      const researchRepository = createDrizzleResearchRepository(
+        database as unknown as ResearchDbExecutor,
+        { now: () => new Date("2026-06-20T12:00:00.000Z") },
+      );
+      const campaignCompanyId = "brave:without-source-url";
+
+      await researchRepository.persistCampaignResearch({
+        workspaceId: "workspace-1",
+        campaignId: "campaign-1",
+        offerId: "offer-1",
+        companies: [
+          {
+            companyId: company.id,
+            campaignCompanyId,
+            name: company.name,
+            domain: company.normalizedDomain,
+            contacts: [
+              {
+                name: "Contacto comercial",
+                role: "Área comercial",
+                corporateEmail: "contacto@empresa.com.ar",
+              },
+            ],
+            evidence: [
+              {
+                kind: "hypothesis",
+                statement:
+                  "La empresa podría beneficiarse si valida prospección manual.",
+                observedAt: new Date("2026-06-20T12:00:00.000Z"),
+                confidence: "low",
+                assumptions: ["Hipótesis pendiente de validación."],
+              },
+            ],
+            score: scoreCompany({
+              capacityToPay: 70,
+              problemMagnitude: 70,
+              urgency: 60,
+              solutionFit: 70,
+              decisionMakerAccess: 50,
+              evidenceConfidence: 50,
+            }),
+          },
+        ],
+      });
+
+      const material =
+        await researchRepository.getCampaignCompanyMaterial({
+          workspaceId: "workspace-1",
+          campaignCompanyId,
+        });
+
+      expect(material?.evidence[0]).toMatchObject({
+        kind: "hypothesis",
+        sourceUrl: undefined,
       });
     } finally {
       await client.close();
