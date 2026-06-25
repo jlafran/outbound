@@ -43,6 +43,9 @@ export default function DashboardPage() {
         <Link className="button-link" href="/offers/new">
           Crear nueva oferta
         </Link>
+        <Link className="button-link secondary-link" href="/campaigns">
+          Ver campañas
+        </Link>
       </section>
 
       <section className="dashboard-section">
@@ -65,6 +68,9 @@ export default function DashboardPage() {
           </li>
           <li>
             <code>/offers/[id]</code> — ver una oferta ya creada.
+          </li>
+          <li>
+            <Link href="/campaigns">/campaigns</Link> — ver campañas creadas.
           </li>
           <li>
             <code>/campaigns/new?offerId=ID</code> — crear campaña desde una

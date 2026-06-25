@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import type { db as applicationDb } from "@/db/client";
 import { campaigns } from "@/db/schema/campaigns";
@@ -11,6 +11,7 @@ import {
 
 export interface CampaignRepository {
   create(record: CampaignRecord): Promise<CampaignRecord>;
+  list(workspaceId: string): Promise<CampaignRecord[]>;
   getById(
     workspaceId: string,
     id: string,
@@ -29,6 +30,12 @@ export function createMemoryCampaignRepository(
       const stored = structuredClone(campaignRecordSchema.parse(record));
       records.set(stored.id, stored);
       return structuredClone(stored);
+    },
+    async list(workspaceId) {
+      return [...records.values()]
+        .filter((record) => record.workspaceId === workspaceId)
+        .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+        .map((record) => structuredClone(record));
     },
     async getById(workspaceId, id) {
       const record = records.get(id);
@@ -76,6 +83,7 @@ export type CampaignCasUpdate = CampaignIdentity & {
 
 export interface CampaignPersistenceExecutor {
   insert(record: CampaignRecord): Promise<unknown>;
+  list?(workspaceId: string): Promise<unknown[]>;
   getByIdentity(identity: CampaignIdentity): Promise<unknown | null>;
   updateByIdentityAndVersion(
     input: CampaignCasUpdate,
@@ -93,6 +101,13 @@ export function createDrizzleCampaignPersistenceExecutor(
         .returning();
 
       return created;
+    },
+    async list(workspaceId) {
+      return database
+        .select()
+        .from(campaigns)
+        .where(eq(campaigns.workspaceId, workspaceId))
+        .orderBy(desc(campaigns.createdAt));
     },
     async getByIdentity({ workspaceId, id }) {
       const [record] = await database
@@ -138,6 +153,14 @@ export function createDrizzleCampaignRepository(
     async create(record) {
       const parsed = campaignRecordSchema.parse(record);
       return campaignRecordSchema.parse(await executor.insert(parsed));
+    },
+    async list(workspaceId) {
+      if (!executor.list) {
+        return [];
+      }
+      return (await executor.list(workspaceId)).map((record) =>
+        campaignRecordSchema.parse(record),
+      );
     },
     async getById(workspaceId, id) {
       const record = await executor.getByIdentity({ workspaceId, id });

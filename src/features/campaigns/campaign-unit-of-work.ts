@@ -71,6 +71,10 @@ export function createMemoryCampaignUnitOfWork(
     create(record) {
       return enqueue(() => committedCampaignRepository.create(record));
     },
+    async list(workspaceId) {
+      await transactionQueue;
+      return committedCampaignRepository.list(workspaceId);
+    },
     async getById(workspaceId, id) {
       await transactionQueue;
       return committedCampaignRepository.getById(workspaceId, id);
