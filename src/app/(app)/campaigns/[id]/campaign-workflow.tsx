@@ -118,7 +118,10 @@ export function CampaignWorkflow({
   recommendations: NicheRecommendation[];
 }) {
   const [selected, setSelected] = useState<string[]>(
-    campaign.approvedNicheIds,
+    campaign.state === "niche_review" &&
+      campaign.approvedNicheIds.length === 0
+      ? recommendations.map((recommendation) => recommendation.id)
+      : campaign.approvedNicheIds,
   );
   const [recommendState, recommendAction, recommendPending] =
     useActionState(recommendNichesAction, initialActionState);

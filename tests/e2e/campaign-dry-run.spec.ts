@@ -119,8 +119,10 @@ test("creates an offer and completes a campaign dry-run", async ({
   await page.getByRole("button", { name: "Pasar a revisión" }).click();
   await expect(
     page.getByRole("button", { name: "Aprobar nichos" }),
-  ).toBeDisabled();
-  await page.getByLabel("Seleccionar Logística").check();
+  ).toBeEnabled();
+  await expect(page.getByLabel("Seleccionar Logística")).toBeChecked();
+  await expect(page.getByLabel("Seleccionar Software B2B")).toBeChecked();
+  await expect(page.getByLabel("Seleccionar Salud privada")).toBeChecked();
   await page.getByRole("button", { name: "Aprobar nichos" }).click();
 
   await expect(page.getByText("Lista para discovery")).toBeVisible();

@@ -348,7 +348,12 @@ export async function approveNichesSubmission(
           approved.version,
           context.actorId,
         );
-    } catch {
+    } catch (error) {
+      console.error("Failed to prepare campaign discovery", {
+        campaignId: parsed.data.campaignId,
+        approvedVersion: approved.version,
+        error,
+      });
       return {
         status: "error",
         globalError:
