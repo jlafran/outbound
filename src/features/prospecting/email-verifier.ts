@@ -18,11 +18,16 @@ type ReacherEmailVerifierOptions = {
   apiToken?: string;
   authHeaderName?: string;
   authHeaderPrefix?: string;
+  requestBodyMode?: "to_email" | "emailList";
   fetcher?: typeof fetch;
 };
 
 type ReacherResponse = {
   is_reachable?: unknown;
+  status?: unknown;
+  result?: unknown;
+  results?: unknown;
+  data?: unknown;
 };
 
 export class ReacherEmailVerifier implements EmailVerifier {
@@ -31,6 +36,7 @@ export class ReacherEmailVerifier implements EmailVerifier {
   private readonly apiToken?: string;
   private readonly authHeaderName: string;
   private readonly authHeaderPrefix: string;
+  private readonly requestBodyMode: "to_email" | "emailList";
   private readonly fetcher: typeof fetch;
 
   constructor(options: ReacherEmailVerifierOptions) {
@@ -39,6 +45,7 @@ export class ReacherEmailVerifier implements EmailVerifier {
     this.apiToken = options.apiToken;
     this.authHeaderName = options.authHeaderName ?? "Authorization";
     this.authHeaderPrefix = options.authHeaderPrefix ?? "Bearer";
+    this.requestBodyMode = options.requestBodyMode ?? "to_email";
     this.fetcher = options.fetcher ?? fetch;
   }
 
@@ -55,21 +62,76 @@ export class ReacherEmailVerifier implements EmailVerifier {
       const response = await this.fetcher(`${this.endpoint}${this.path}`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ to_email: email }),
+        body: JSON.stringify(
+          this.requestBodyMode === "emailList"
+            ? { emailList: [email] }
+            : { to_email: email },
+        ),
       });
       if (!response.ok) return { status: "unknown" };
 
       const body = (await response.json()) as ReacherResponse;
-      return { status: mapReacherStatus(body.is_reachable) };
+      return { status: mapVerifierStatus(extractStatus(body)) };
     } catch {
       return { status: "unknown" };
     }
   }
 }
 
-function mapReacherStatus(value: unknown): EmailVerificationStatus {
+function extractStatus(body: ReacherResponse): unknown {
+  if (body.is_reachable !== undefined) return body.is_reachable;
+  if (body.status !== undefined) return body.status;
+  if (Array.isArray(body.results)) {
+    return extractStatusFromListItem(body.results[0]);
+  }
+  if (Array.isArray(body.data)) {
+    return extractStatusFromListItem(body.data[0]);
+  }
+  if (Array.isArray(body.result)) {
+    return extractStatusFromListItem(body.result[0]);
+  }
+  return body.result;
+}
+
+function extractStatusFromListItem(value: unknown): unknown {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown>;
+  return (
+    item.status ??
+    item.result ??
+    item.is_reachable ??
+    item.deliverability ??
+    item.state
+  );
+}
+
+function mapVerifierStatus(value: unknown): EmailVerificationStatus {
+  const normalized = String(value ?? "").toLowerCase();
+  if (
+    normalized === "safe" ||
+    normalized === "valid" ||
+    normalized === "deliverable" ||
+    normalized === "ok"
+  ) {
+    return "valid";
+  }
+  if (
+    normalized === "risky" ||
+    normalized === "catch_all" ||
+    normalized === "catch-all" ||
+    normalized === "accept_all" ||
+    normalized === "unknown_accept_all"
+  ) {
+    return "risky";
+  }
   if (value === "safe") return "valid";
-  if (value === "risky") return "risky";
-  if (value === "invalid") return "invalid";
+  if (
+    normalized === "invalid" ||
+    normalized === "undeliverable" ||
+    normalized === "bad" ||
+    normalized === "failed"
+  ) {
+    return "invalid";
+  }
   return "unknown";
 }

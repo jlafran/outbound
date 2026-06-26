@@ -34,6 +34,7 @@ export default async function CampaignProspectingTestPage({
   const reacherPath = process.env.REACHER_CHECK_PATH;
   const reacherAuthHeaderName = process.env.REACHER_AUTH_HEADER_NAME;
   const reacherAuthHeaderPrefix = process.env.REACHER_AUTH_HEADER_PREFIX;
+  const reacherRequestBodyMode = process.env.REACHER_REQUEST_BODY_MODE;
   const shouldRun = query.run === "1";
   const result =
     shouldRun && apiKey
@@ -46,6 +47,10 @@ export default async function CampaignProspectingTestPage({
                 apiToken: reacherApiToken,
                 authHeaderName: reacherAuthHeaderName,
                 authHeaderPrefix: reacherAuthHeaderPrefix,
+                requestBodyMode:
+                  reacherRequestBodyMode === "emailList"
+                    ? "emailList"
+                    : undefined,
               })
             : undefined,
           maxCompanies: 12,

@@ -65,6 +65,50 @@ describe("ReacherEmailVerifier", () => {
     );
   });
 
+  it("supports No2Bounce-style emailList requests and list responses", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          results: [
+            {
+              email: "mlopez@example.com",
+              status: "valid",
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    const verifier = new ReacherEmailVerifier({
+      endpoint: "https://api.no2bounce.example",
+      path: "/verify",
+      apiToken: "secret-token",
+      authHeaderName: "apitoken",
+      authHeaderPrefix: "",
+      requestBodyMode: "emailList",
+      fetcher,
+    });
+
+    await expect(verifier.verify("mlopez@example.com")).resolves.toEqual({
+      status: "valid",
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://api.no2bounce.example/verify",
+      expect.objectContaining({
+        body: JSON.stringify({
+          emailList: ["mlopez@example.com"],
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          apitoken: "secret-token",
+        },
+      }),
+    );
+  });
+
   it("returns unknown instead of throwing when the verifier is unavailable", async () => {
     const verifier = new ReacherEmailVerifier({
       endpoint: "http://localhost:8080",
