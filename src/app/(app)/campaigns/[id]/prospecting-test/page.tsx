@@ -3,9 +3,10 @@ import { notFound } from "next/navigation";
 
 import { getAppServices } from "@/features/app/app-services";
 import { resolveInternalActionContext } from "@/features/app/internal-action-context";
-import { DentalAestheticsProspectingService } from "@/features/prospecting/dental-prospecting-service";
-import { ReacherEmailVerifier } from "@/features/prospecting/email-verifier";
-import { BraveSearchClient } from "@/features/research/brave-search-client";
+import {
+  refreshProspectingAction,
+  runProspectingAction,
+} from "@/features/prospecting/prospecting-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export default async function CampaignProspectingTestPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ run?: string }>;
+  searchParams: Promise<{ status?: string; error?: string }>;
 }) {
   const [{ id }, query, context] = await Promise.all([
     params,
@@ -30,34 +31,32 @@ export default async function CampaignProspectingTestPage({
 
   const apiKey = process.env.BRAVE_SEARCH_API_KEY;
   const reacherEndpoint = process.env.REACHER_ENDPOINT;
-  const reacherApiToken = process.env.REACHER_API_TOKEN;
-  const reacherPath = process.env.REACHER_CHECK_PATH;
-  const reacherAuthHeaderName = process.env.REACHER_AUTH_HEADER_NAME;
-  const reacherAuthHeaderPrefix = process.env.REACHER_AUTH_HEADER_PREFIX;
-  const reacherRequestBodyMode = process.env.REACHER_REQUEST_BODY_MODE;
-  const shouldRun = query.run === "1";
-  const result =
-    shouldRun && apiKey
-      ? await new DentalAestheticsProspectingService({
-          searchClient: new BraveSearchClient({ apiKey }),
-          emailVerifier: reacherEndpoint
-            ? new ReacherEmailVerifier({
-                endpoint: reacherEndpoint,
-                path: reacherPath,
-                apiToken: reacherApiToken,
-                authHeaderName: reacherAuthHeaderName,
-                authHeaderPrefix: reacherAuthHeaderPrefix,
-                requestBodyMode:
-                  reacherRequestBodyMode === "no2bounceSingle"
-                    ? "no2bounceSingle"
-                    : reacherRequestBodyMode === "emailList"
-                      ? "emailList"
-                      : undefined,
-              })
-            : undefined,
-          maxCompanies: 12,
-        }).run()
-      : null;
+  const latestRun =
+    await services.prospectingRepository.getLatestCompletedRun(
+      context.workspaceId,
+      campaign.id,
+    );
+  const pendingVerifications = latestRun
+    ? await services.prospectingRepository.listPendingVerifications(
+        context.workspaceId,
+        latestRun.id,
+      )
+    : [];
+  const result = latestRun?.resultSnapshot ?? null;
+  const feedback =
+    query.status === "run_complete"
+      ? "Corrida guardada correctamente. Recargar esta página no vuelve a consumir búsquedas ni verificaciones."
+      : query.status === "refresh_complete"
+        ? "Verificaciones pendientes actualizadas sin volver a enviar los emails."
+        : null;
+  const error =
+    query.error === "missing_brave"
+      ? "Falta BRAVE_SEARCH_API_KEY en el entorno."
+      : query.error === "missing_verifier"
+        ? "No hay un verificador configurado para actualizar los pendientes."
+        : query.error
+          ? "No pudimos completar la operación. Revisá los logs antes de reintentar."
+          : null;
 
   return (
     <>
@@ -97,23 +96,46 @@ export default async function CampaignProspectingTestPage({
             Falta BRAVE_SEARCH_API_KEY en el entorno de Vercel/local.
           </p>
         ) : null}
+        {feedback ? <p className="success-message">{feedback}</p> : null}
+        {error ? (
+          <p className="global-error" role="alert">
+            {error}
+          </p>
+        ) : null}
         <p className="muted">
-          Ejecutar la prueba consume búsquedas de Brave. No guarda datos todavía:
-          sirve para afinar calidad antes de persistir y escalar.
+          Ejecutar una nueva corrida consume búsquedas de Brave y nuevas
+          verificaciones. El resultado queda guardado y una recarga no repite
+          ninguna operación externa.
         </p>
         <p className="muted">
           Verificación de email:{" "}
           {reacherEndpoint
-            ? "Reacher activo"
-            : "sin Reacher; se muestran candidatos sin verificar"}
+            ? "No2Bounce/Reacher activo"
+            : "sin verificador; se muestran candidatos sin verificar"}
         </p>
-        <Link
-          aria-disabled={!apiKey}
-          className="button-link"
-          href={`/campaigns/${campaign.id}/prospecting-test?run=1`}
-        >
-          Ejecutar prueba con Brave
-        </Link>
+        {latestRun ? (
+          <p className="muted">
+            Última corrida guardada: {latestRun.completedAt?.toLocaleString("es-AR")} · {pendingVerifications.length} verificaciones pendientes
+          </p>
+        ) : null}
+        <form action={runProspectingAction}>
+          <input name="campaignId" type="hidden" value={campaign.id} />
+          <button disabled={!apiKey} type="submit">
+            Ejecutar nueva corrida
+          </button>
+        </form>
+        {pendingVerifications.length > 0 ? (
+          <form action={refreshProspectingAction}>
+            <input name="campaignId" type="hidden" value={campaign.id} />
+            <button disabled={!reacherEndpoint} type="submit">
+              Actualizar verificaciones pendientes
+            </button>
+            <p className="muted">
+              Esta actualización consulta los tracking IDs existentes: no
+              envía nuevamente los emails ni consume otro crédito de alta.
+            </p>
+          </form>
+        ) : null}
       </section>
 
       {result ? (

@@ -46,6 +46,8 @@ describe("DentalAestheticsProspectingService", () => {
             status: email.startsWith("mariana.lopez")
               ? "valid"
               : "unknown",
+            provider: "no2bounce" as const,
+            trackingId: `tracking:${email}`,
           };
         },
       },
@@ -71,6 +73,9 @@ describe("DentalAestheticsProspectingService", () => {
             email: "mariana.lopez@clinicadentalpalermo.com.ar",
             source: "pattern",
             verificationStatus: "valid",
+            verificationProvider: "no2bounce",
+            verificationTrackingId:
+              "tracking:mariana.lopez@clinicadentalpalermo.com.ar",
           },
           {
             email: "mlopez@clinicadentalpalermo.com.ar",

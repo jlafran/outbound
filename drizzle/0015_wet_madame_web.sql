@@ -1,0 +1,1 @@
+CREATE INDEX "prospecting_verifications_workspace_run_idx" ON "prospecting_email_verifications" USING btree ("workspace_id","run_id");

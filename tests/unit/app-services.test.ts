@@ -4,8 +4,20 @@ import { createResearchCampaignDryRunProjection } from "@/features/campaigns/cam
 import type { DossierRepository } from "@/features/dossiers/dossier-repository";
 import { createMemoryResearchRepository } from "@/features/research/research-repository";
 import { scoreCompany } from "@/features/research/score-company";
+import { createMemoryAppServices } from "@/features/app/app-services";
 
 describe("persistent campaign dry-run projection", () => {
+  it("composes a prospecting repository for persisted runs", async () => {
+    const services = createMemoryAppServices();
+
+    await expect(
+      services.prospectingRepository.getLatestCompletedRun(
+        "workspace-1",
+        "campaign-1",
+      ),
+    ).resolves.toBeNull();
+  });
+
   it("serves generated campaign data from persisted research and dossier state", async () => {
     const researchRepository = createMemoryResearchRepository();
     const score = scoreCompany({

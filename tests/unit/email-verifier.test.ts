@@ -268,7 +268,45 @@ describe("ReacherEmailVerifier", () => {
 
     await expect(verifier.verify("pending@example.com")).resolves.toEqual({
       status: "pending",
+      provider: "no2bounce",
+      trackingId: "track-pending",
     });
+  });
+
+  it("refreshes an existing No2Bounce tracking id without submitting the email again", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          trackingId: "track-existing",
+          result: { scoreStatus: "Deliverable" },
+          overallStatus: "Completed",
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    const verifier = new ReacherEmailVerifier({
+      endpoint: "https://connect.no2bounce.com",
+      path: "/v2/n2b_validate_email",
+      apiToken: "secret-token",
+      authHeaderName: "apitoken",
+      authHeaderPrefix: "",
+      requestBodyMode: "no2bounceSingle",
+      fetcher,
+    });
+
+    await expect(verifier.refresh("track-existing")).resolves.toEqual({
+      status: "valid",
+      provider: "no2bounce",
+      trackingId: "track-existing",
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://connect.no2bounce.com/v2/n2b_validate_email?trackingId=track-existing",
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
   it("returns unknown instead of throwing when the verifier is unavailable", async () => {

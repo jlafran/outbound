@@ -37,6 +37,8 @@ export type ProspectingLead = {
         | "invalid"
         | "pending"
         | "unknown";
+      verificationProvider?: "no2bounce" | "reacher";
+      verificationTrackingId?: string;
       confidence?: number;
     }>;
     phones: string[];

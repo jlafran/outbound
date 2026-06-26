@@ -200,6 +200,8 @@ export class DentalAestheticsProspectingService {
       verified.push({
         ...candidate,
         verificationStatus: result.status,
+        verificationProvider: result.provider,
+        verificationTrackingId: result.trackingId,
       });
     }
     return verified;

@@ -67,6 +67,11 @@ import {
   createDrizzleResearchRepository,
   type ResearchRepository,
 } from "@/features/research/research-repository";
+import {
+  createDrizzleProspectingRepository,
+  createMemoryProspectingRepository,
+  type ProspectingRepository,
+} from "@/features/prospecting/prospecting-repository";
 
 export interface AppServices {
   offerService: OfferService;
@@ -80,6 +85,7 @@ export interface AppServices {
   dossierService: DossierService;
   dossierRepository: DossierRepository;
   auditRepository: AuditRepository;
+  prospectingRepository: ProspectingRepository;
 }
 
 function toDossierSource(company: ResearchCompany): DossierSourceMaterial {
@@ -209,6 +215,7 @@ function composeServices(input: {
   dossierService: DossierService;
   dossierRepository: DossierRepository;
   auditRepository: AuditRepository;
+  prospectingRepository: ProspectingRepository;
   nicheRecommendationProjection: NicheRecommendationProjection;
   campaignDryRunProjection: CampaignDryRunProjection;
   researchProvider: ResearchProvider;
@@ -256,6 +263,7 @@ export function createMemoryAppServices(): AppServices {
     dossierService,
     dossierRepository: dossierUnitOfWork.dossierRepository,
     auditRepository: campaignUnitOfWork.auditRepository,
+    prospectingRepository: createMemoryProspectingRepository(),
     nicheRecommendationProjection,
     campaignDryRunProjection,
     researchProvider: new FakeResearchProvider(companyRepository),
@@ -279,6 +287,7 @@ async function createProductionAppServices(): Promise<AppServices> {
   );
   const auditRepository = createDrizzleAuditRepository(db);
   const researchRepository = createDrizzleResearchRepository(db);
+  const prospectingRepository = createDrizzleProspectingRepository(db);
   const nicheAdvisor = new FakeNicheAdvisor();
   const nicheRecommendationProjection =
     createRegeneratingNicheRecommendationProjection({
@@ -321,6 +330,7 @@ async function createProductionAppServices(): Promise<AppServices> {
     dossierService,
     dossierRepository,
     auditRepository,
+    prospectingRepository,
     nicheRecommendationProjection,
     campaignDryRunProjection,
     researchProvider,

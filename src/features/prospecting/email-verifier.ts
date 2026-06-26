@@ -7,10 +7,13 @@ export type EmailVerificationStatus =
 
 export type EmailVerificationResult = {
   status: EmailVerificationStatus;
+  provider?: "no2bounce" | "reacher";
+  trackingId?: string;
 };
 
 export interface EmailVerifier {
   verify(email: string): Promise<EmailVerificationResult>;
+  refresh?(trackingId: string): Promise<EmailVerificationResult>;
 }
 
 type ReacherEmailVerifierOptions = {
@@ -109,6 +112,56 @@ export class ReacherEmailVerifier implements EmailVerifier {
     }
   }
 
+  async refresh(trackingId: string): Promise<EmailVerificationResult> {
+    if (this.requestBodyMode !== "no2bounceSingle") {
+      return { status: "unknown" };
+    }
+
+    try {
+      const response = await this.fetcher(
+        `${this.endpoint}${this.path}?trackingId=${encodeURIComponent(
+          trackingId,
+        )}`,
+        {
+          method: "GET",
+          headers: this.createHeaders(),
+        },
+      );
+      if (!response.ok) {
+        return { status: "unknown", provider: "no2bounce", trackingId };
+      }
+      const body = (await response.json()) as ReacherResponse;
+      const overallStatus = extractOverallStatus(body);
+      return {
+        status:
+          overallStatus === "Processing" || overallStatus === "Queued"
+            ? "pending"
+            : mapVerifierStatus(extractStatus(body)),
+        provider: "no2bounce",
+        trackingId,
+      };
+    } catch (error) {
+      console.error("email_verifier_refresh_error", {
+        mode: "no2bounceSingle",
+        trackingIdHash: hashEmailForLog(trackingId),
+        error: error instanceof Error ? error.message : "unknown",
+      });
+      return { status: "unknown", provider: "no2bounce", trackingId };
+    }
+  }
+
+  private createHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.apiToken) {
+      headers[this.authHeaderName] = this.authHeaderPrefix
+        ? `${this.authHeaderPrefix} ${this.apiToken}`
+        : this.apiToken;
+    }
+    return headers;
+  }
+
   private async verifyNo2BounceSingle(
     email: string,
     headers: Record<string, string>,
@@ -181,7 +234,9 @@ export class ReacherEmailVerifier implements EmailVerifier {
       }
     }
 
-    return { status: sawProcessing ? "pending" : "unknown" };
+    return sawProcessing
+      ? { status: "pending", provider: "no2bounce", trackingId }
+      : { status: "unknown", provider: "no2bounce", trackingId };
   }
 }
 
