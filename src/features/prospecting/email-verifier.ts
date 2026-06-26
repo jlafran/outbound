@@ -19,6 +19,8 @@ type ReacherEmailVerifierOptions = {
   authHeaderName?: string;
   authHeaderPrefix?: string;
   requestBodyMode?: "to_email" | "emailList" | "no2bounceSingle";
+  no2BouncePollAttempts?: number;
+  no2BouncePollDelayMs?: number;
   fetcher?: typeof fetch;
 };
 
@@ -37,6 +39,8 @@ export class ReacherEmailVerifier implements EmailVerifier {
   private readonly authHeaderName: string;
   private readonly authHeaderPrefix: string;
   private readonly requestBodyMode: "to_email" | "emailList" | "no2bounceSingle";
+  private readonly no2BouncePollAttempts: number;
+  private readonly no2BouncePollDelayMs: number;
   private readonly fetcher: typeof fetch;
 
   constructor(options: ReacherEmailVerifierOptions) {
@@ -46,6 +50,8 @@ export class ReacherEmailVerifier implements EmailVerifier {
     this.authHeaderName = options.authHeaderName ?? "Authorization";
     this.authHeaderPrefix = options.authHeaderPrefix ?? "Bearer";
     this.requestBodyMode = options.requestBodyMode ?? "to_email";
+    this.no2BouncePollAttempts = options.no2BouncePollAttempts ?? 3;
+    this.no2BouncePollDelayMs = options.no2BouncePollDelayMs ?? 750;
     this.fetcher = options.fetcher ?? fetch;
   }
 
@@ -62,6 +68,10 @@ export class ReacherEmailVerifier implements EmailVerifier {
       if (this.requestBodyMode === "no2bounceSingle") {
         return this.verifyNo2BounceSingle(email, headers);
       }
+      console.info("email_verifier_submit", {
+        mode: this.requestBodyMode,
+        emailHash: hashEmailForLog(email),
+      });
       const response = await this.fetcher(`${this.endpoint}${this.path}`, {
         method: "POST",
         headers,
@@ -71,11 +81,29 @@ export class ReacherEmailVerifier implements EmailVerifier {
             : { to_email: email },
         ),
       });
-      if (!response.ok) return { status: "unknown" };
+      if (!response.ok) {
+        console.info("email_verifier_submit_failed", {
+          mode: this.requestBodyMode,
+          status: response.status,
+          emailHash: hashEmailForLog(email),
+        });
+        return { status: "unknown" };
+      }
 
       const body = (await response.json()) as ReacherResponse;
-      return { status: mapVerifierStatus(extractStatus(body)) };
-    } catch {
+      const status = mapVerifierStatus(extractStatus(body));
+      console.info("email_verifier_result", {
+        mode: this.requestBodyMode,
+        status,
+        emailHash: hashEmailForLog(email),
+      });
+      return { status };
+    } catch (error) {
+      console.error("email_verifier_error", {
+        mode: this.requestBodyMode,
+        emailHash: hashEmailForLog(email),
+        error: error instanceof Error ? error.message : "unknown",
+      });
       return { status: "unknown" };
     }
   }
@@ -84,29 +112,76 @@ export class ReacherEmailVerifier implements EmailVerifier {
     email: string,
     headers: Record<string, string>,
   ): Promise<EmailVerificationResult> {
+    console.info("email_verifier_submit", {
+      mode: "no2bounceSingle",
+      emailHash: hashEmailForLog(email),
+    });
     const submit = await this.fetcher(`${this.endpoint}${this.path}`, {
       method: "POST",
       headers,
       body: JSON.stringify({ email }),
     });
-    if (!submit.ok) return { status: "unknown" };
+    if (!submit.ok) {
+      console.info("email_verifier_submit_failed", {
+        mode: "no2bounceSingle",
+        status: submit.status,
+        emailHash: hashEmailForLog(email),
+      });
+      return { status: "unknown" };
+    }
     const submitBody = (await submit.json()) as ReacherResponse;
     const trackingId = extractTrackingId(submitBody);
-    if (!trackingId) return { status: "unknown" };
+    if (!trackingId) {
+      console.info("email_verifier_tracking_missing", {
+        mode: "no2bounceSingle",
+        emailHash: hashEmailForLog(email),
+      });
+      return { status: "unknown" };
+    }
 
-    const result = await this.fetcher(
-      `${this.endpoint}${this.path}?trackingId=${encodeURIComponent(
-        trackingId,
-      )}`,
-      {
-        method: "GET",
-        headers,
-      },
-    );
-    if (!result.ok) return { status: "unknown" };
-    const resultBody = (await result.json()) as ReacherResponse;
-    return { status: mapVerifierStatus(extractStatus(resultBody)) };
+    for (let attempt = 1; attempt <= this.no2BouncePollAttempts; attempt += 1) {
+      if (attempt > 1 && this.no2BouncePollDelayMs > 0) {
+        await delay(this.no2BouncePollDelayMs);
+      }
+      const result = await this.fetcher(
+        `${this.endpoint}${this.path}?trackingId=${encodeURIComponent(
+          trackingId,
+        )}`,
+        {
+          method: "GET",
+          headers,
+        },
+      );
+      if (!result.ok) {
+        console.info("email_verifier_result_failed", {
+          mode: "no2bounceSingle",
+          attempt,
+          status: result.status,
+          emailHash: hashEmailForLog(email),
+        });
+        continue;
+      }
+      const resultBody = (await result.json()) as ReacherResponse;
+      const status = mapVerifierStatus(extractStatus(resultBody));
+      const overallStatus = extractOverallStatus(resultBody);
+      console.info("email_verifier_result", {
+        mode: "no2bounceSingle",
+        attempt,
+        status,
+        overallStatus,
+        emailHash: hashEmailForLog(email),
+      });
+      if (status !== "unknown" || overallStatus === "Completed") {
+        return { status };
+      }
+    }
+
+    return { status: "unknown" };
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function extractStatus(body: ReacherResponse): unknown {
@@ -135,6 +210,11 @@ function extractTrackingId(body: ReacherResponse): string | null {
   if (!data || typeof data !== "object") return null;
   const trackingId = (data as Record<string, unknown>).trackingId;
   return typeof trackingId === "string" && trackingId ? trackingId : null;
+}
+
+function extractOverallStatus(body: ReacherResponse): string | undefined {
+  const value = (body as Record<string, unknown>).overallStatus;
+  return typeof value === "string" ? value : undefined;
 }
 
 function extractStatusFromListItem(value: unknown): unknown {
@@ -183,4 +263,12 @@ function mapVerifierStatus(value: unknown): EmailVerificationStatus {
     return "invalid";
   }
   return "unknown";
+}
+
+function hashEmailForLog(email: string): string {
+  let hash = 0;
+  for (let index = 0; index < email.length; index += 1) {
+    hash = (hash * 31 + email.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(16);
 }
