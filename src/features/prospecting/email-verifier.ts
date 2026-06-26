@@ -2,6 +2,7 @@ export type EmailVerificationStatus =
   | "valid"
   | "risky"
   | "invalid"
+  | "pending"
   | "unknown";
 
 export type EmailVerificationResult = {
@@ -139,6 +140,7 @@ export class ReacherEmailVerifier implements EmailVerifier {
       return { status: "unknown" };
     }
 
+    let sawProcessing = false;
     for (let attempt = 1; attempt <= this.no2BouncePollAttempts; attempt += 1) {
       if (attempt > 1 && this.no2BouncePollDelayMs > 0) {
         await delay(this.no2BouncePollDelayMs);
@@ -171,12 +173,15 @@ export class ReacherEmailVerifier implements EmailVerifier {
         overallStatus,
         emailHash: hashEmailForLog(email),
       });
+      if (overallStatus === "Processing" || overallStatus === "Queued") {
+        sawProcessing = true;
+      }
       if (status !== "unknown" || overallStatus === "Completed") {
         return { status };
       }
     }
 
-    return { status: "unknown" };
+    return { status: sawProcessing ? "pending" : "unknown" };
   }
 }
 

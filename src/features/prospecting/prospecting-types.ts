@@ -35,6 +35,7 @@ export type ProspectingLead = {
         | "valid"
         | "risky"
         | "invalid"
+        | "pending"
         | "unknown";
       confidence?: number;
     }>;

@@ -228,6 +228,49 @@ describe("ReacherEmailVerifier", () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
+  it("returns pending when No2Bounce is still processing after polling", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: { trackingId: "track-pending" },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockImplementation(async () =>
+        new Response(
+          JSON.stringify({
+            trackingId: "track-pending",
+            overallStatus: "Processing",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    const verifier = new ReacherEmailVerifier({
+      endpoint: "https://connect.no2bounce.com",
+      path: "/v2/n2b_validate_email",
+      apiToken: "secret-token",
+      authHeaderName: "apitoken",
+      authHeaderPrefix: "",
+      requestBodyMode: "no2bounceSingle",
+      no2BouncePollAttempts: 2,
+      no2BouncePollDelayMs: 0,
+      fetcher,
+    });
+
+    await expect(verifier.verify("pending@example.com")).resolves.toEqual({
+      status: "pending",
+    });
+  });
+
   it("returns unknown instead of throwing when the verifier is unavailable", async () => {
     const verifier = new ReacherEmailVerifier({
       endpoint: "http://localhost:8080",
