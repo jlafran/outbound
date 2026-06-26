@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getAppServices } from "@/features/app/app-services";
 import { resolveInternalActionContext } from "@/features/app/internal-action-context";
 import { DentalAestheticsProspectingService } from "@/features/prospecting/dental-prospecting-service";
+import { ReacherEmailVerifier } from "@/features/prospecting/email-verifier";
 import { BraveSearchClient } from "@/features/research/brave-search-client";
 
 export const dynamic = "force-dynamic";
@@ -28,11 +29,15 @@ export default async function CampaignProspectingTestPage({
   if (!campaign) notFound();
 
   const apiKey = process.env.BRAVE_SEARCH_API_KEY;
+  const reacherEndpoint = process.env.REACHER_ENDPOINT;
   const shouldRun = query.run === "1";
   const result =
     shouldRun && apiKey
       ? await new DentalAestheticsProspectingService({
           searchClient: new BraveSearchClient({ apiKey }),
+          emailVerifier: reacherEndpoint
+            ? new ReacherEmailVerifier({ endpoint: reacherEndpoint })
+            : undefined,
           maxCompanies: 12,
         }).run()
       : null;
@@ -79,6 +84,12 @@ export default async function CampaignProspectingTestPage({
           Ejecutar la prueba consume búsquedas de Brave. No guarda datos todavía:
           sirve para afinar calidad antes de persistir y escalar.
         </p>
+        <p className="muted">
+          Verificación de email:{" "}
+          {reacherEndpoint
+            ? "Reacher activo"
+            : "sin Reacher; se muestran candidatos sin verificar"}
+        </p>
         <Link
           aria-disabled={!apiKey}
           className="button-link"
@@ -111,9 +122,23 @@ export default async function CampaignProspectingTestPage({
                     <p>
                       <strong>Decisores:</strong>{" "}
                       {lead.decisionMakers.length > 0
-                        ? lead.decisionMakers
-                            .map((person) => `${person.name} (${person.role})`)
-                            .join(", ")
+                        ? lead.decisionMakers.map((person, index) => (
+                            <span key={`${person.name}:${person.sourceUrl}`}>
+                              {index > 0 ? ", " : null}
+                              {person.linkedinUrl ? (
+                                <a
+                                  href={person.linkedinUrl}
+                                  rel="noreferrer"
+                                  target="_blank"
+                                >
+                                  {person.name}
+                                </a>
+                              ) : (
+                                person.name
+                              )}{" "}
+                              ({person.role})
+                            </span>
+                          ))
                         : "No encontrado todavía"}
                     </p>
                     <p>
@@ -125,6 +150,17 @@ export default async function CampaignProspectingTestPage({
                         ),
                       ].join(" · ") || "No encontrado todavía"}
                     </p>
+                    {lead.contacts.emailCandidates.length > 0 ? (
+                      <p>
+                        <strong>Emails candidatos:</strong>{" "}
+                        {lead.contacts.emailCandidates
+                          .map(
+                            (candidate) =>
+                              `${candidate.email} (${candidate.verificationStatus})`,
+                          )
+                          .join(" · ")}
+                      </p>
+                    ) : null}
                     {lead.opportunitySignals.length > 0 ? (
                       <p>
                         <strong>Señal:</strong>{" "}
@@ -136,6 +172,38 @@ export default async function CampaignProspectingTestPage({
               </ol>
             )}
           </section>
+
+          {result.unassociatedDecisionMakers.length > 0 ? (
+            <section aria-labelledby="unassociated-decision-makers">
+              <h2 id="unassociated-decision-makers">
+                Decisores encontrados sin asociar
+              </h2>
+              <p className="muted">
+                No son basura: son perfiles públicos que todavía no pudimos
+                conectar con una empresa concreta.
+              </p>
+              <ol className="company-list">
+                {result.unassociatedDecisionMakers.map((person) => (
+                  <li key={`${person.name}:${person.sourceUrl}`}>
+                    <strong>{person.name}</strong>
+                    <br />
+                    <span className="muted">
+                      {person.role} · confianza {person.confidence}
+                    </span>
+                    <p>
+                      <a
+                        href={person.sourceUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Ver perfil/fuente
+                      </a>
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : null}
 
           <section aria-labelledby="prospecting-rejected">
             <h2 id="prospecting-rejected">Resultados descartados</h2>

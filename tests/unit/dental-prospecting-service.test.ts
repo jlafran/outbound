@@ -40,6 +40,15 @@ describe("DentalAestheticsProspectingService", () => {
     const service = new DentalAestheticsProspectingService({
       searchClient,
       maxCompanies: 1,
+      emailVerifier: {
+        async verify(email) {
+          return {
+            status: email.startsWith("mariana.lopez")
+              ? "valid"
+              : "unknown",
+          };
+        },
+      },
     });
 
     const result = await service.run();
@@ -57,6 +66,23 @@ describe("DentalAestheticsProspectingService", () => {
       ],
       contacts: {
         emails: ["recepcion@clinicadentalpalermo.com.ar"],
+        emailCandidates: [
+          {
+            email: "mariana.lopez@clinicadentalpalermo.com.ar",
+            source: "pattern",
+            verificationStatus: "valid",
+          },
+          {
+            email: "mlopez@clinicadentalpalermo.com.ar",
+            source: "pattern",
+            verificationStatus: "unknown",
+          },
+          {
+            email: "mariana@clinicadentalpalermo.com.ar",
+            source: "pattern",
+            verificationStatus: "unknown",
+          },
+        ],
         whatsapps: ["5491123456789"],
       },
     });
@@ -66,6 +92,58 @@ describe("DentalAestheticsProspectingService", () => {
         expect.objectContaining({
           domain: "example.com",
           kind: "irrelevant",
+        }),
+      ]),
+    );
+  });
+
+  it("keeps public LinkedIn people as unassociated decision makers instead of rejected trash", async () => {
+    const searchClient: ProspectingSearchClient = {
+      searchWeb: vi.fn(async ({ query }) => {
+        if (query.includes("site:linkedin.com/in")) {
+          return [
+            {
+              title: "Daniel Escribano - Director médico",
+              url: "https://www.linkedin.com/in/daniel-escribano",
+              description:
+                "Director médico en Clínica Odontológica Daniel Escribano.",
+              domain: "linkedin.com",
+            },
+          ];
+        }
+        return [
+          {
+            title: "Clínica Odontológica Daniel Escribano",
+            url: "https://clinicaescribano.com.ar",
+            description: "Clínica dental con turnos por WhatsApp.",
+            domain: "clinicaescribano.com.ar",
+          },
+        ];
+      }),
+    };
+    const service = new DentalAestheticsProspectingService({
+      searchClient,
+      maxCompanies: 10,
+    });
+
+    const result = await service.run();
+
+    expect(result.leads[0].decisionMakers).toEqual([
+      expect.objectContaining({
+        name: "Daniel Escribano",
+        linkedinUrl: "https://www.linkedin.com/in/daniel-escribano",
+      }),
+    ]);
+    expect(result.rejected).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "person_candidate" }),
+      ]),
+    );
+    expect(result.unassociatedDecisionMakers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "Daniel Escribano",
+          linkedinUrl: "https://www.linkedin.com/in/daniel-escribano",
         }),
       ]),
     );

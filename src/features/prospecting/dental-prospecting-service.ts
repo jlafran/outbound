@@ -12,14 +12,17 @@ import type {
   RejectedProspectingResult,
 } from "./prospecting-types";
 import type { BraveSearchResult } from "@/features/research/brave-search-client";
+import type { EmailVerifier } from "./email-verifier";
 
 type DentalAestheticsProspectingServiceOptions = {
   searchClient: ProspectingSearchClient;
+  emailVerifier?: EmailVerifier;
   maxCompanies?: number;
 };
 
 export type DentalAestheticsProspectingResult = {
   leads: ProspectingLead[];
+  unassociatedDecisionMakers: ProspectingLead["decisionMakers"];
   rejected: RejectedProspectingResult[];
 };
 
@@ -34,6 +37,7 @@ export class DentalAestheticsProspectingService {
 
   async run(): Promise<DentalAestheticsProspectingResult> {
     const rejected: RejectedProspectingResult[] = [];
+    const unassociatedDecisionMakers: ProspectingLead["decisionMakers"] = [];
     const candidates = new Map<string, BraveSearchResult>();
 
     for (const query of buildDentalAestheticsQueries()) {
@@ -48,6 +52,11 @@ export class DentalAestheticsProspectingService {
 
       for (const result of results) {
         const classification = classifyProspectingResult(result);
+        if (classification.kind === "person_candidate") {
+          const person = extractDecisionMakerFromResult(result);
+          if (person) unassociatedDecisionMakers.push(person);
+          continue;
+        }
         if (classification.kind !== "company_candidate") {
           rejected.push({
             title: result.title,
@@ -73,6 +82,13 @@ export class DentalAestheticsProspectingService {
       const contacts = extractContactsFromText(
         `${candidate.title} ${candidate.description}`,
       );
+      const emailCandidates = createEmailCandidates({
+        domain: candidate.domain,
+        decisionMakers,
+        publicEmails: contacts.emails,
+      });
+      const verifiedEmailCandidates =
+        await this.verifyEmailCandidates(emailCandidates);
       const companyName = cleanCompanyName(candidate.title);
       const opportunitySignals = hasDentalOpportunitySignal(candidate)
         ? [
@@ -102,14 +118,17 @@ export class DentalAestheticsProspectingService {
         domain: candidate.domain,
         websiteUrl: candidate.url,
         status:
-          score >= 80
+          decisionMakers.length > 0 && score >= 80
             ? "actionable"
             : score >= 55
               ? "review"
               : "discarded",
         score,
         decisionMakers,
-        contacts,
+        contacts: {
+          ...contacts,
+          emailCandidates: verifiedEmailCandidates,
+        },
         opportunitySignals,
         evidence: [
           {
@@ -127,7 +146,13 @@ export class DentalAestheticsProspectingService {
     }
 
     leads.sort((left, right) => right.score - left.score);
-    return { leads, rejected };
+    return {
+      leads,
+      unassociatedDecisionMakers: dedupeDecisionMakers(
+        unassociatedDecisionMakers,
+      ),
+      rejected,
+    };
   }
 
   private async findDecisionMakers(
@@ -163,6 +188,82 @@ export class DentalAestheticsProspectingService {
 
     return people;
   }
+
+  private async verifyEmailCandidates(
+    candidates: ProspectingLead["contacts"]["emailCandidates"],
+  ): Promise<ProspectingLead["contacts"]["emailCandidates"]> {
+    if (!this.options.emailVerifier) return candidates;
+
+    const verified: ProspectingLead["contacts"]["emailCandidates"] = [];
+    for (const candidate of candidates) {
+      const result = await this.options.emailVerifier.verify(candidate.email);
+      verified.push({
+        ...candidate,
+        verificationStatus: result.status,
+      });
+    }
+    return verified;
+  }
+}
+
+function dedupeDecisionMakers(
+  people: ProspectingLead["decisionMakers"],
+): ProspectingLead["decisionMakers"] {
+  const seen = new Set<string>();
+  return people.filter((person) => {
+    const key = `${person.name}:${person.linkedinUrl ?? person.sourceUrl}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function createEmailCandidates(input: {
+  domain: string;
+  decisionMakers: ProspectingLead["decisionMakers"];
+  publicEmails: string[];
+}): ProspectingLead["contacts"]["emailCandidates"] {
+  const seen = new Set(input.publicEmails.map((email) => email.toLowerCase()));
+  const candidates: ProspectingLead["contacts"]["emailCandidates"] = [];
+
+  for (const person of input.decisionMakers) {
+    const nameParts = splitName(person.name);
+    if (!nameParts) continue;
+    const values = [
+      `${nameParts.first}.${nameParts.last}@${input.domain}`,
+      `${nameParts.first[0]}${nameParts.last}@${input.domain}`,
+      `${nameParts.first}@${input.domain}`,
+    ];
+    for (const email of values) {
+      const normalized = email.toLowerCase();
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      candidates.push({
+        email: normalized,
+        source: "pattern",
+        verificationStatus: "unverified",
+      });
+    }
+  }
+
+  return candidates;
+}
+
+function splitName(
+  value: string,
+): { first: string; last: string } | null {
+  const parts = value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-zñ\s-]/g, "")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length < 2) return null;
+  return {
+    first: parts[0],
+    last: parts[parts.length - 1],
+  };
 }
 
 function cleanCompanyName(value: string): string {

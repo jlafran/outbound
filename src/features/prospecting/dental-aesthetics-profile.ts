@@ -17,6 +17,7 @@ export type ProspectingDecisionMaker = {
   name: string;
   role: string;
   sourceUrl: string;
+  linkedinUrl?: string;
   confidence: "low" | "medium" | "high";
 };
 
@@ -52,6 +53,16 @@ const contentPatterns = [
   /\btrabajo\b/i,
 ];
 
+const institutionPatterns = [
+  /\bcolegio\b/i,
+  /\basociaci[oó]n\b/i,
+  /\bfederaci[oó]n\b/i,
+  /\bconsejo\b/i,
+  /\bc[aá]mara\b/i,
+  /\buniversidad\b/i,
+  /\bfacultad\b/i,
+];
+
 const opportunityPatterns = [
   /\bwhatsapp\b/i,
   /\bturnos?\b/i,
@@ -64,6 +75,8 @@ const opportunityPatterns = [
 const rolePatterns: Array<{ pattern: RegExp; role: string }> = [
   { pattern: /\bdirectora? odontol[oó]gica?\b/i, role: "Directora odontológica" },
   { pattern: /\bdirectora? m[eé]dica?\b/i, role: "Director/a médica" },
+  { pattern: /\bdirector m[eé]dico\b/i, role: "Director/a médica" },
+  { pattern: /\bdirectora?\b/i, role: "Director/a" },
   { pattern: /\bfundadora?\b/i, role: "Fundador/a" },
   { pattern: /\bdueña?o?\b/i, role: "Dueño/a" },
   { pattern: /\bgerente general\b/i, role: "Gerente general" },
@@ -103,6 +116,14 @@ export function classifyProspectingResult(
       kind: "source_only",
       useful: false,
       reason: "Directorio útil para descubrir, pero no es el lead final.",
+    };
+  }
+
+  if (institutionPatterns.some((pattern) => pattern.test(text))) {
+    return {
+      kind: "source_only",
+      useful: false,
+      reason: "Institución/cámara/colegio útil como fuente, no como cliente final.",
     };
   }
 
@@ -171,16 +192,22 @@ export function extractDecisionMakerFromResult(
   const matchedRole = rolePatterns.find(({ pattern }) => pattern.test(text));
   if (!matchedRole) return null;
 
-  const nameMatch = text.match(
-    /\b(?:Dr\.?|Dra\.?)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\b/,
-  );
+  const nameMatch =
+    text.match(
+      /\b(?:Dr\.?|Dra\.?)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\b/,
+    ) ??
+    text.match(
+      /^([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\s+[-–|·]/,
+    );
   if (!nameMatch) return null;
 
+  const isLinkedIn = result.domain.endsWith("linkedin.com");
   return {
     name: nameMatch[1],
     role: matchedRole.role,
     sourceUrl: result.url,
-    confidence: result.domain.endsWith("linkedin.com") ? "medium" : "low",
+    linkedinUrl: isLinkedIn ? result.url : undefined,
+    confidence: isLinkedIn ? "medium" : "low",
   };
 }
 

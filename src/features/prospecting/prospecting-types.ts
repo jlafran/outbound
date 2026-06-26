@@ -22,10 +22,22 @@ export type ProspectingLead = {
     name: string;
     role: string;
     sourceUrl: string;
+    linkedinUrl?: string;
     confidence: "low" | "medium" | "high";
   }>;
   contacts: {
     emails: string[];
+    emailCandidates: Array<{
+      email: string;
+      source: "pattern" | "public" | "hunter" | "reacher";
+      verificationStatus:
+        | "unverified"
+        | "valid"
+        | "risky"
+        | "invalid"
+        | "unknown";
+      confidence?: number;
+    }>;
     phones: string[];
     whatsapps: string[];
   };

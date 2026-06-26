@@ -54,6 +54,18 @@ describe("dental aesthetics prospecting profile", () => {
       }),
     ).toMatchObject({
       kind: "source_only",
+        useful: false,
+      });
+
+    expect(
+      classifyProspectingResult({
+        title: "Colegio de Odontólogos Distrito I",
+        url: "https://colescba.org.ar",
+        description: "Turnos, trámites y WhatsApp institucional.",
+        domain: "colescba.org.ar",
+      }),
+    ).toMatchObject({
+      kind: "source_only",
       useful: false,
     });
   });
@@ -81,6 +93,18 @@ describe("dental aesthetics prospecting profile", () => {
       name: "Mariana López",
       role: "Directora odontológica",
       confidence: "medium",
+    });
+
+    expect(
+      extractDecisionMakerFromResult({
+        title: "Daniel Escribano - Director médico",
+        url: "https://www.linkedin.com/in/daniel-escribano",
+        description: "Director médico en Clínica Odontológica Daniel Escribano.",
+        domain: "linkedin.com",
+      }),
+    ).toMatchObject({
+      name: "Daniel Escribano",
+      role: "Director/a médica",
     });
   });
 
