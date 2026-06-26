@@ -48,9 +48,11 @@ export default async function CampaignProspectingTestPage({
                 authHeaderName: reacherAuthHeaderName,
                 authHeaderPrefix: reacherAuthHeaderPrefix,
                 requestBodyMode:
-                  reacherRequestBodyMode === "emailList"
-                    ? "emailList"
-                    : undefined,
+                  reacherRequestBodyMode === "no2bounceSingle"
+                    ? "no2bounceSingle"
+                    : reacherRequestBodyMode === "emailList"
+                      ? "emailList"
+                      : undefined,
               })
             : undefined,
           maxCompanies: 12,

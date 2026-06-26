@@ -109,6 +109,69 @@ describe("ReacherEmailVerifier", () => {
     );
   });
 
+  it("supports No2Bounce single-email tracking flow", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            message: "Success",
+            statusCode: 200,
+            data: { trackingId: "track-123" },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            trackingId: "track-123",
+            email: "mlopez@example.com",
+            result: {
+              score: "60",
+              scoreStatus: "Catch-All",
+            },
+            overallStatus: "Completed",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    const verifier = new ReacherEmailVerifier({
+      endpoint: "https://connect.no2bounce.com",
+      path: "/v2/n2b_validate_email",
+      apiToken: "secret-token",
+      authHeaderName: "apitoken",
+      authHeaderPrefix: "",
+      requestBodyMode: "no2bounceSingle",
+      fetcher,
+    });
+
+    await expect(verifier.verify("mlopez@example.com")).resolves.toEqual({
+      status: "risky",
+    });
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      "https://connect.no2bounce.com/v2/n2b_validate_email",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ email: "mlopez@example.com" }),
+      }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      "https://connect.no2bounce.com/v2/n2b_validate_email?trackingId=track-123",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+  });
+
   it("returns unknown instead of throwing when the verifier is unavailable", async () => {
     const verifier = new ReacherEmailVerifier({
       endpoint: "http://localhost:8080",

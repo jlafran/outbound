@@ -18,7 +18,7 @@ type ReacherEmailVerifierOptions = {
   apiToken?: string;
   authHeaderName?: string;
   authHeaderPrefix?: string;
-  requestBodyMode?: "to_email" | "emailList";
+  requestBodyMode?: "to_email" | "emailList" | "no2bounceSingle";
   fetcher?: typeof fetch;
 };
 
@@ -36,7 +36,7 @@ export class ReacherEmailVerifier implements EmailVerifier {
   private readonly apiToken?: string;
   private readonly authHeaderName: string;
   private readonly authHeaderPrefix: string;
-  private readonly requestBodyMode: "to_email" | "emailList";
+  private readonly requestBodyMode: "to_email" | "emailList" | "no2bounceSingle";
   private readonly fetcher: typeof fetch;
 
   constructor(options: ReacherEmailVerifierOptions) {
@@ -59,6 +59,9 @@ export class ReacherEmailVerifier implements EmailVerifier {
           ? `${this.authHeaderPrefix} ${this.apiToken}`
           : this.apiToken;
       }
+      if (this.requestBodyMode === "no2bounceSingle") {
+        return this.verifyNo2BounceSingle(email, headers);
+      }
       const response = await this.fetcher(`${this.endpoint}${this.path}`, {
         method: "POST",
         headers,
@@ -76,11 +79,43 @@ export class ReacherEmailVerifier implements EmailVerifier {
       return { status: "unknown" };
     }
   }
+
+  private async verifyNo2BounceSingle(
+    email: string,
+    headers: Record<string, string>,
+  ): Promise<EmailVerificationResult> {
+    const submit = await this.fetcher(`${this.endpoint}${this.path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ email }),
+    });
+    if (!submit.ok) return { status: "unknown" };
+    const submitBody = (await submit.json()) as ReacherResponse;
+    const trackingId = extractTrackingId(submitBody);
+    if (!trackingId) return { status: "unknown" };
+
+    const result = await this.fetcher(
+      `${this.endpoint}${this.path}?trackingId=${encodeURIComponent(
+        trackingId,
+      )}`,
+      {
+        method: "GET",
+        headers,
+      },
+    );
+    if (!result.ok) return { status: "unknown" };
+    const resultBody = (await result.json()) as ReacherResponse;
+    return { status: mapVerifierStatus(extractStatus(resultBody)) };
+  }
 }
 
 function extractStatus(body: ReacherResponse): unknown {
   if (body.is_reachable !== undefined) return body.is_reachable;
   if (body.status !== undefined) return body.status;
+  if (body.result && typeof body.result === "object" && !Array.isArray(body.result)) {
+    const result = body.result as Record<string, unknown>;
+    return result.scoreStatus ?? result.status ?? result.result;
+  }
   if (Array.isArray(body.results)) {
     return extractStatusFromListItem(body.results[0]);
   }
@@ -93,11 +128,24 @@ function extractStatus(body: ReacherResponse): unknown {
   return body.result;
 }
 
+function extractTrackingId(body: ReacherResponse): string | null {
+  const direct = (body as Record<string, unknown>).trackingId;
+  if (typeof direct === "string" && direct) return direct;
+  const data = body.data;
+  if (!data || typeof data !== "object") return null;
+  const trackingId = (data as Record<string, unknown>).trackingId;
+  return typeof trackingId === "string" && trackingId ? trackingId : null;
+}
+
 function extractStatusFromListItem(value: unknown): unknown {
   if (!value || typeof value !== "object") return undefined;
   const item = value as Record<string, unknown>;
   return (
+    (item.result && typeof item.result === "object"
+      ? (item.result as Record<string, unknown>).scoreStatus
+      : undefined) ??
     item.status ??
+    item.scoreStatus ??
     item.result ??
     item.is_reachable ??
     item.deliverability ??
@@ -117,8 +165,9 @@ function mapVerifierStatus(value: unknown): EmailVerificationStatus {
   }
   if (
     normalized === "risky" ||
-    normalized === "catch_all" ||
     normalized === "catch-all" ||
+    normalized === "catch all" ||
+    normalized === "catch_all" ||
     normalized === "accept_all" ||
     normalized === "unknown_accept_all"
   ) {
