@@ -35,6 +35,36 @@ describe("ReacherEmailVerifier", () => {
     );
   });
 
+  it("can send a hosted API token with a custom path and auth header", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ is_reachable: "risky" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const verifier = new ReacherEmailVerifier({
+      endpoint: "https://api.example.com",
+      path: "/check_email",
+      apiToken: "secret-token",
+      authHeaderName: "X-API-Key",
+      authHeaderPrefix: "",
+      fetcher,
+    });
+
+    await expect(verifier.verify("mlopez@example.com")).resolves.toEqual({
+      status: "risky",
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://api.example.com/check_email",
+      expect.objectContaining({
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": "secret-token",
+        },
+      }),
+    );
+  });
+
   it("returns unknown instead of throwing when the verifier is unavailable", async () => {
     const verifier = new ReacherEmailVerifier({
       endpoint: "http://localhost:8080",

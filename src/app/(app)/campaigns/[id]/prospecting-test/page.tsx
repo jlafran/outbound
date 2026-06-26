@@ -30,13 +30,23 @@ export default async function CampaignProspectingTestPage({
 
   const apiKey = process.env.BRAVE_SEARCH_API_KEY;
   const reacherEndpoint = process.env.REACHER_ENDPOINT;
+  const reacherApiToken = process.env.REACHER_API_TOKEN;
+  const reacherPath = process.env.REACHER_CHECK_PATH;
+  const reacherAuthHeaderName = process.env.REACHER_AUTH_HEADER_NAME;
+  const reacherAuthHeaderPrefix = process.env.REACHER_AUTH_HEADER_PREFIX;
   const shouldRun = query.run === "1";
   const result =
     shouldRun && apiKey
       ? await new DentalAestheticsProspectingService({
           searchClient: new BraveSearchClient({ apiKey }),
           emailVerifier: reacherEndpoint
-            ? new ReacherEmailVerifier({ endpoint: reacherEndpoint })
+            ? new ReacherEmailVerifier({
+                endpoint: reacherEndpoint,
+                path: reacherPath,
+                apiToken: reacherApiToken,
+                authHeaderName: reacherAuthHeaderName,
+                authHeaderPrefix: reacherAuthHeaderPrefix,
+              })
             : undefined,
           maxCompanies: 12,
         }).run()
