@@ -4,7 +4,6 @@ import {
   extractContactsFromText,
   extractDecisionMakerFromResult,
   hasDentalOpportunitySignal,
-  scoreDentalAestheticsLead,
 } from "./dental-aesthetics-profile";
 import type {
   ProspectingLead,
@@ -13,10 +12,17 @@ import type {
 } from "./prospecting-types";
 import type { BraveSearchResult } from "@/features/research/brave-search-client";
 import type { EmailVerifier } from "./email-verifier";
+import { associateDecisionMakers } from "./decision-maker-associator";
+import type { OfficialWebsiteCrawler } from "./official-website-crawler";
+import { WebsiteResearchExtractor } from "./website-research-extractor";
+import { scoreProspectingLead } from "./prospecting-lead-scorer";
+import { buildPersonalizedMessage } from "./personalized-message-builder";
+import type { WebsiteResearch } from "./prospecting-types";
 
 type DentalAestheticsProspectingServiceOptions = {
   searchClient: ProspectingSearchClient;
   emailVerifier?: EmailVerifier;
+  websiteCrawler?: Pick<OfficialWebsiteCrawler, "crawl">;
   maxCompanies?: number;
 };
 
@@ -78,52 +84,81 @@ export class DentalAestheticsProspectingService {
 
     const leads: ProspectingLead[] = [];
     for (const candidate of candidates.values()) {
-      const decisionMakers = await this.findDecisionMakers(candidate);
-      const contacts = extractContactsFromText(
+      const snippetContacts = extractContactsFromText(
         `${candidate.title} ${candidate.description}`,
       );
+      const websiteResearch = await this.researchOfficialWebsite(candidate);
+      const companyName =
+        websiteResearch.companyName ?? cleanCompanyName(candidate.title);
+      const searchedDecisionMakers = await this.findDecisionMakers(candidate);
+      const association = associateDecisionMakers({
+        companyName,
+        domain: candidate.domain,
+        websitePeople: websiteResearch.people,
+        searchPeople: searchedDecisionMakers,
+      });
+      const decisionMakers = association.associated;
+      unassociatedDecisionMakers.push(...association.unassociated);
+      const contacts = mergeContacts(snippetContacts, websiteResearch.contacts);
       const emailCandidates = createEmailCandidates({
         domain: candidate.domain,
         decisionMakers,
-        publicEmails: contacts.emails,
+        websiteResearch,
       });
       const verifiedEmailCandidates =
         await this.verifyEmailCandidates(emailCandidates);
-      const companyName = cleanCompanyName(candidate.title);
-      const opportunitySignals = hasDentalOpportunitySignal(candidate)
-        ? [
-            "La fuente pública menciona turnos/WhatsApp/tratamientos de estética dental, señal útil para automatización de seguimiento.",
-          ]
-        : [];
-      const hasHumanEmail = contacts.emails.some(
-        (email) => !/^(info|contacto|ventas|recepcion|turnos)@/i.test(email),
+      const opportunitySignals = websiteResearch.signals.length
+        ? websiteResearch.signals.map(({ statement }) => statement)
+        : hasDentalOpportunitySignal(candidate)
+          ? [
+              "La fuente pública menciona turnos, WhatsApp o tratamientos compatibles con la oferta.",
+            ]
+          : [];
+      const sourceUrls = [
+        candidate.url,
+        ...websiteResearch.pages
+          .filter(({ status }) => status === "fetched")
+          .map(({ finalUrl, requestedUrl }) => finalUrl ?? requestedUrl),
+        ...decisionMakers.map(({ sourceUrl }) => sourceUrl),
+      ];
+      const hasPersonalEmail = verifiedEmailCandidates.some(({ email }) =>
+        isPersonalEmail(email),
       );
-      const hasUsableDirectContact =
-        hasHumanEmail ||
-        contacts.whatsapps.length > 0 ||
-        contacts.emails.some((email) =>
-          /^(recepcion|turnos|contacto)@/i.test(email),
-        );
-      const score = scoreDentalAestheticsLead({
-        companyCandidate: true,
-        officialWebsite: true,
-        hasDecisionMaker: decisionMakers.length > 0,
-        hasHumanEmail: hasUsableDirectContact,
+      const genericEmails = contacts.emails.filter((email) => !isPersonalEmail(email));
+      const scoreBreakdown = scoreProspectingLead({
+        companyValidated: websiteResearch.status !== "failed",
+        offerFitEvidenceCount:
+          websiteResearch.services.length + websiteResearch.signals.length,
+        decisionMakerConfidences: decisionMakers.map(({ confidence }) => confidence),
+        hasPersonalEmail,
         hasWhatsapp: contacts.whatsapps.length > 0,
-        hasOpportunitySignal: opportunitySignals.length > 0,
+        hasGenericEmail: genericEmails.length > 0,
+        emailVerificationStatuses: verifiedEmailCandidates.map(
+          ({ verificationStatus }) => verificationStatus,
+        ),
+        opportunitySignalCount: websiteResearch.signals.length,
+        sourceUrls,
+        flags: websiteResearch.status === "failed" ? ["ambiguous"] : [],
+      });
+      const recommendedContact = selectRecommendedContact({
+        decisionMakers,
+        emailCandidates: verifiedEmailCandidates,
+        whatsapps: contacts.whatsapps,
+        genericEmails,
+        websiteResearch,
+      });
+      const messageDraft = buildPersonalizedMessage({
+        companyName,
+        decisionMaker: decisionMakers[0] ?? null,
+        signal: websiteResearch.signals[0] ?? null,
       });
 
       leads.push({
         companyName,
         domain: candidate.domain,
         websiteUrl: candidate.url,
-        status:
-          decisionMakers.length > 0 && score >= 80
-            ? "actionable"
-            : score >= 55
-              ? "review"
-              : "discarded",
-        score,
+        status: scoreBreakdown.status,
+        score: scoreBreakdown.total,
         decisionMakers,
         contacts: {
           ...contacts,
@@ -141,7 +176,16 @@ export class DentalAestheticsProspectingService {
             url: person.sourceUrl,
             description: `${person.name} · ${person.role}`,
           })),
+          ...websiteResearch.signals.map((signal) => ({
+            label: "Evidencia del sitio oficial",
+            url: signal.sourceUrl,
+            description: signal.statement,
+          })),
         ],
+        websiteResearch,
+        scoreBreakdown,
+        recommendedContact,
+        messageDraft,
       });
     }
 
@@ -195,16 +239,39 @@ export class DentalAestheticsProspectingService {
     if (!this.options.emailVerifier) return candidates;
 
     const verified: ProspectingLead["contacts"]["emailCandidates"] = [];
+    let submissions = 0;
+    let foundValid = false;
     for (const candidate of candidates) {
+      if (foundValid || submissions >= 3) {
+        verified.push(candidate);
+        continue;
+      }
       const result = await this.options.emailVerifier.verify(candidate.email);
+      submissions += 1;
       verified.push({
         ...candidate,
         verificationStatus: result.status,
         verificationProvider: result.provider,
         verificationTrackingId: result.trackingId,
       });
+      if (result.status === "valid") foundValid = true;
     }
     return verified;
+  }
+
+  private async researchOfficialWebsite(
+    candidate: BraveSearchResult,
+  ): Promise<WebsiteResearch> {
+    if (!this.options.websiteCrawler) return failedWebsiteResearch(candidate.url);
+    try {
+      const crawled = await this.options.websiteCrawler.crawl({
+        domain: candidate.domain,
+        candidateUrl: candidate.url,
+      });
+      return new WebsiteResearchExtractor().extract(crawled);
+    } catch {
+      return failedWebsiteResearch(candidate.url);
+    }
   }
 }
 
@@ -223,10 +290,27 @@ function dedupeDecisionMakers(
 function createEmailCandidates(input: {
   domain: string;
   decisionMakers: ProspectingLead["decisionMakers"];
-  publicEmails: string[];
+  websiteResearch: WebsiteResearch;
 }): ProspectingLead["contacts"]["emailCandidates"] {
-  const seen = new Set(input.publicEmails.map((email) => email.toLowerCase()));
+  const seen = new Set<string>();
   const candidates: ProspectingLead["contacts"]["emailCandidates"] = [];
+
+  const publicPersonalEmails = unique([
+    ...input.websiteResearch.people
+      .map(({ email }) => email)
+      .filter((email): email is string => Boolean(email)),
+    ...input.websiteResearch.contacts.emails.filter(isPersonalEmail),
+  ]).filter((email) => email.toLowerCase().endsWith(`@${input.domain}`));
+  for (const email of publicPersonalEmails) {
+    const normalized = email.toLowerCase();
+    seen.add(normalized);
+    candidates.push({
+      email: normalized,
+      source: "public",
+      verificationStatus: "unverified",
+      confidence: 95,
+    });
+  }
 
   for (const person of input.decisionMakers) {
     const nameParts = splitName(person.name);
@@ -249,6 +333,85 @@ function createEmailCandidates(input: {
   }
 
   return candidates;
+}
+
+function mergeContacts(
+  snippet: ReturnType<typeof extractContactsFromText>,
+  website: WebsiteResearch["contacts"],
+) {
+  return {
+    emails: unique([...snippet.emails, ...website.emails]),
+    phones: unique([...snippet.phones, ...website.phones]),
+    whatsapps: unique([...snippet.whatsapps, ...website.whatsapps]),
+  };
+}
+
+function isPersonalEmail(email: string): boolean {
+  return !/^(info|contacto|ventas|recepcion|turnos|administracion|consultas)@/i.test(
+    email,
+  );
+}
+
+function selectRecommendedContact(input: {
+  decisionMakers: ProspectingLead["decisionMakers"];
+  emailCandidates: ProspectingLead["contacts"]["emailCandidates"];
+  whatsapps: string[];
+  genericEmails: string[];
+  websiteResearch: WebsiteResearch;
+}): ProspectingLead["recommendedContact"] {
+  const email =
+    input.emailCandidates.find(({ verificationStatus }) => verificationStatus === "valid") ??
+    input.emailCandidates.find(
+      ({ source, verificationStatus }) =>
+        source === "public" && verificationStatus !== "invalid",
+    );
+  const person = input.decisionMakers[0];
+  if (email) {
+    return {
+      name: person?.name,
+      role: person?.role,
+      channel: "email",
+      value: email.email,
+      confidence: email.verificationStatus === "valid" ? "high" : "medium",
+      sourceUrl: person?.sourceUrl,
+    };
+  }
+  if (input.whatsapps[0]) {
+    return {
+      name: person?.name,
+      role: person?.role,
+      channel: "whatsapp",
+      value: input.whatsapps[0],
+      confidence: "medium",
+      sourceUrl: input.websiteResearch.signals[0]?.sourceUrl,
+    };
+  }
+  if (input.genericEmails[0]) {
+    return {
+      channel: "generic_email",
+      value: input.genericEmails[0],
+      confidence: "low",
+    };
+  }
+  return null;
+}
+
+function failedWebsiteResearch(url: string): WebsiteResearch {
+  return {
+    status: "failed",
+    pages: [{ requestedUrl: url, status: "blocked" }],
+    contacts: {
+      emails: [],
+      phones: [],
+      whatsapps: [],
+      linkedinUrls: [],
+      instagramUrls: [],
+    },
+    people: [],
+    services: [],
+    signals: [],
+    errors: [{ url, code: "crawl_failed" }],
+  };
 }
 
 function splitName(
@@ -274,4 +437,8 @@ function cleanCompanyName(value: string): string {
     .replace(/\b(cl[ií]nica odontol[oó]gica [^|·-]+)\b/i, (match) => match)
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
 }

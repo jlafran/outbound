@@ -3,6 +3,12 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  oxc: {
+    jsx: {
+      runtime: "automatic",
+      importSource: "react",
+    },
+  },
   test: {
     environment: "node",
     exclude: ["tests/e2e/**", "**/node_modules/**", "**/.git/**"],

@@ -14,6 +14,7 @@ import {
 import { DentalAestheticsProspectingService } from "./dental-prospecting-service";
 import { ReacherEmailVerifier } from "./email-verifier";
 import { ProspectingRunService } from "./prospecting-run-service";
+import { OfficialWebsiteCrawler } from "./official-website-crawler";
 
 function configuredVerifier(): ReacherEmailVerifier | undefined {
   const endpoint = process.env.REACHER_ENDPOINT?.trim();
@@ -57,6 +58,7 @@ export async function runProspectingAction(formData: FormData): Promise<void> {
   const runner = new DentalAestheticsProspectingService({
     searchClient: new BraveSearchClient({ apiKey: apiKey ?? "" }),
     emailVerifier: verifier,
+    websiteCrawler: new OfficialWebsiteCrawler(),
     maxCompanies: 12,
   });
   const runService = new ProspectingRunService(

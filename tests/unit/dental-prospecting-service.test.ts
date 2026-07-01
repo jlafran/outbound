@@ -37,17 +37,37 @@ describe("DentalAestheticsProspectingService", () => {
         ];
       }),
     };
+    const verify = vi.fn(async (email: string) => ({
+      status: email.startsWith("mariana.lopez")
+        ? ("valid" as const)
+        : ("unknown" as const),
+      provider: "no2bounce" as const,
+      trackingId: `tracking:${email}`,
+    }));
     const service = new DentalAestheticsProspectingService({
       searchClient,
       maxCompanies: 1,
-      emailVerifier: {
-        async verify(email) {
+      emailVerifier: { verify },
+      websiteCrawler: {
+        async crawl() {
           return {
-            status: email.startsWith("mariana.lopez")
-              ? "valid"
-              : "unknown",
-            provider: "no2bounce" as const,
-            trackingId: `tracking:${email}`,
+            pages: [
+              {
+                requestedUrl: "https://clinicadentalpalermo.com.ar/equipo",
+                finalUrl: "https://clinicadentalpalermo.com.ar/equipo",
+                status: "fetched" as const,
+                html: `
+                  <meta property="og:site_name" content="Clínica Odontológica Palermo">
+                  <section class="team-member">
+                    <h2>Dra. Mariana López</h2>
+                    <p>Directora odontológica</p>
+                    <a href="mailto:mariana.lopez@clinicadentalpalermo.com.ar">Email</a>
+                  </section>
+                  <p>Implantes y ortodoncia invisible.</p>
+                  <a href="https://wa.me/5491123456789">Pedí tu turno por WhatsApp</a>
+                `,
+              },
+            ],
           };
         },
       },
@@ -67,11 +87,14 @@ describe("DentalAestheticsProspectingService", () => {
         },
       ],
       contacts: {
-        emails: ["recepcion@clinicadentalpalermo.com.ar"],
+        emails: [
+          "recepcion@clinicadentalpalermo.com.ar",
+          "mariana.lopez@clinicadentalpalermo.com.ar",
+        ],
         emailCandidates: [
           {
             email: "mariana.lopez@clinicadentalpalermo.com.ar",
-            source: "pattern",
+            source: "public",
             verificationStatus: "valid",
             verificationProvider: "no2bounce",
             verificationTrackingId:
@@ -80,17 +103,28 @@ describe("DentalAestheticsProspectingService", () => {
           {
             email: "mlopez@clinicadentalpalermo.com.ar",
             source: "pattern",
-            verificationStatus: "unknown",
+            verificationStatus: "unverified",
           },
           {
             email: "mariana@clinicadentalpalermo.com.ar",
             source: "pattern",
-            verificationStatus: "unknown",
+            verificationStatus: "unverified",
           },
         ],
         whatsapps: ["5491123456789"],
       },
     });
+    expect(result.leads[0].websiteResearch?.people[0].name).toBe("Mariana López");
+    expect(result.leads[0].scoreBreakdown?.components.decisionMaker).toBe(20);
+    expect(result.leads[0].messageDraft?.evidenceUrls).toEqual([
+      "https://clinicadentalpalermo.com.ar/equipo",
+    ]);
+    expect(result.leads[0].recommendedContact).toMatchObject({
+      name: "Mariana López",
+      channel: "email",
+      value: "mariana.lopez@clinicadentalpalermo.com.ar",
+    });
+    expect(verify).toHaveBeenCalledTimes(1);
     expect(result.leads[0].score).toBeGreaterThanOrEqual(85);
     expect(result.rejected).toEqual(
       expect.arrayContaining([
@@ -129,6 +163,20 @@ describe("DentalAestheticsProspectingService", () => {
     const service = new DentalAestheticsProspectingService({
       searchClient,
       maxCompanies: 10,
+      websiteCrawler: {
+        async crawl() {
+          return {
+            pages: [
+              {
+                requestedUrl: "https://clinicaescribano.com.ar",
+                finalUrl: "https://clinicaescribano.com.ar",
+                status: "fetched" as const,
+                html: "<main>Clínica dental con turnos por WhatsApp.</main>",
+              },
+            ],
+          };
+        },
+      },
     });
 
     const result = await service.run();
@@ -152,5 +200,53 @@ describe("DentalAestheticsProspectingService", () => {
         }),
       ]),
     );
+  });
+
+  it("continues researching other companies when one official site fails", async () => {
+    const searchClient: ProspectingSearchClient = {
+      searchWeb: vi.fn(async ({ query }) =>
+        query.includes("site:linkedin.com/in")
+          ? []
+          : [
+              {
+                title: "Clínica Uno",
+                url: "https://uno.com.ar",
+                description: "Clínica odontológica",
+                domain: "uno.com.ar",
+              },
+              {
+                title: "Clínica Dos",
+                url: "https://dos.com.ar",
+                description: "Clínica odontológica",
+                domain: "dos.com.ar",
+              },
+            ],
+      ),
+    };
+    const service = new DentalAestheticsProspectingService({
+      searchClient,
+      maxCompanies: 2,
+      websiteCrawler: {
+        async crawl({ domain }: { domain: string }) {
+          if (domain === "uno.com.ar") throw new Error("timeout");
+          return {
+            pages: [
+              {
+                requestedUrl: "https://dos.com.ar",
+                finalUrl: "https://dos.com.ar",
+                status: "fetched" as const,
+                html: "<main>Clínica odontológica con implantes.</main>",
+              },
+            ],
+          };
+        },
+      },
+    });
+
+    const result = await service.run();
+
+    expect(result.leads).toHaveLength(2);
+    expect(result.leads.find(({ domain }) => domain === "uno.com.ar")?.websiteResearch?.status).toBe("failed");
+    expect(result.leads.find(({ domain }) => domain === "dos.com.ar")?.websiteResearch?.status).toBe("completed");
   });
 });

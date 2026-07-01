@@ -7,6 +7,7 @@ import {
   refreshProspectingAction,
   runProspectingAction,
 } from "@/features/prospecting/prospecting-actions";
+import { ProspectingLeadEnrichment } from "./prospecting-lead-enrichment";
 
 export const dynamic = "force-dynamic";
 
@@ -206,6 +207,7 @@ export default async function CampaignProspectingTestPage({
                         {lead.opportunitySignals.join(" ")}
                       </p>
                     ) : null}
+                    <ProspectingLeadEnrichment lead={lead} />
                   </li>
                 ))}
               </ol>

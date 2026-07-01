@@ -82,6 +82,43 @@ const result: DentalAestheticsProspectingResult = {
       },
       opportunitySignals: [],
       evidence: [],
+      websiteResearch: {
+        status: "completed",
+        pages: [
+          {
+            requestedUrl: "https://clinicauno.com.ar/equipo",
+            finalUrl: "https://clinicauno.com.ar/equipo",
+            status: "fetched",
+          },
+        ],
+        contacts: {
+          emails: ["ana@clinicauno.com.ar"],
+          phones: [],
+          whatsapps: [],
+          linkedinUrls: [],
+          instagramUrls: [],
+        },
+        people: [],
+        services: ["Implantes"],
+        signals: [],
+        errors: [],
+      },
+      scoreBreakdown: {
+        total: 75,
+        components: {
+          companyValidation: 20,
+          offerFit: 15,
+          decisionMaker: 20,
+          directChannel: 15,
+          verifiedEmail: 0,
+          opportunitySignal: 0,
+          sourceQuality: 5,
+        },
+        penalties: [],
+        reasons: [],
+      },
+      recommendedContact: null,
+      messageDraft: null,
     },
   ],
   unassociatedDecisionMakers: [],
@@ -143,6 +180,10 @@ describe("createDrizzleProspectingRepository", () => {
       );
       expect(run?.resultSnapshot?.leads[0].contacts.emailCandidates[0])
         .toMatchObject({ verificationStatus: "valid" });
+      expect(run?.resultSnapshot?.leads[0].websiteResearch).toMatchObject({
+        status: "completed",
+        services: ["Implantes"],
+      });
       await expect(
         repository.listPendingVerifications("workspace-1", "run-1"),
       ).resolves.toEqual([]);

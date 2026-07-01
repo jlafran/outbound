@@ -19,6 +19,8 @@ export type ProspectingDecisionMaker = {
   sourceUrl: string;
   linkedinUrl?: string;
   confidence: "low" | "medium" | "high";
+  companyEvidence?: string;
+  associationReason?: string;
 };
 
 type ScoreDentalLeadInput = {
@@ -208,6 +210,7 @@ export function extractDecisionMakerFromResult(
     sourceUrl: result.url,
     linkedinUrl: isLinkedIn ? result.url : undefined,
     confidence: isLinkedIn ? "medium" : "low",
+    companyEvidence: text,
   };
 }
 
