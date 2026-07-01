@@ -101,4 +101,67 @@ describe("WebsiteResearchExtractor", () => {
     expect(result.status).toBe("failed");
     expect(result.pages[0].status).toBe("javascript_required");
   });
+
+  it("rejects malformed emails extracted from noisy official pages", () => {
+    const extractor = new WebsiteResearchExtractor();
+
+    const result = extractor.extract({
+      pages: [
+        {
+          requestedUrl: "https://clinica.com.ar/contacto",
+          finalUrl: "https://clinica.com.ar/contacto",
+          status: "fetched",
+          html: `
+            <main>
+              <p>%20consultas@clinica.com.ar</p>
+              <p>saludcontactohola@zurodental.com.ar</p>
+              <p>8162emailhola@zurodental.com.ardireccion</p>
+              <a href="mailto:%20turnos@clinica.com.ar?subject=Turno">Turnos</a>
+              <a href="mailto:ana.perez@clinica.com.ar">Ana</a>
+            </main>
+          `,
+        },
+      ],
+    });
+
+    expect(result.contacts.emails).toEqual([
+      "turnos@clinica.com.ar",
+      "ana.perez@clinica.com.ar",
+    ]);
+  });
+
+  it("finds decision makers in about and staff-style sections", () => {
+    const extractor = new WebsiteResearchExtractor();
+
+    const result = extractor.extract({
+      pages: [
+        {
+          requestedUrl: "https://clinica.com.ar/nosotros",
+          finalUrl: "https://clinica.com.ar/nosotros",
+          status: "fetched",
+          html: `
+            <section class="about-card">
+              <h3>Dr. Martín Torres</h3>
+              <p>CEO y director general de la clínica.</p>
+            </section>
+            <section class="staff-card">
+              <strong>Dra. Lucía García</strong>
+              <p>Responsable comercial</p>
+            </section>
+          `,
+        },
+      ],
+    });
+
+    expect(result.people).toEqual([
+      expect.objectContaining({
+        name: "Martín Torres",
+        role: "Director general/CEO",
+      }),
+      expect.objectContaining({
+        name: "Lucía García",
+        role: "Responsable comercial/marketing",
+      }),
+    ]);
+  });
 });

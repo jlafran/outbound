@@ -49,6 +49,8 @@ export function scoreProspectingLead(input: {
           : 0,
     verifiedEmail: input.emailVerificationStatuses.includes("valid")
       ? 15
+      : input.emailVerificationStatuses.includes("official_website")
+        ? 12
       : input.emailVerificationStatuses.includes("risky")
         ? 7
         : 0,

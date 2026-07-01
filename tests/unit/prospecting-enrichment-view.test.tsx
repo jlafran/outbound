@@ -14,7 +14,24 @@ describe("ProspectingLeadEnrichment", () => {
       status: "actionable",
       score: 95,
       decisionMakers: [],
-      contacts: { emails: [], emailCandidates: [], phones: [], whatsapps: [] },
+      contacts: {
+        emails: [],
+        emailCandidates: [
+          {
+            email: "ana@clinica.com.ar",
+            source: "official_website",
+            verificationStatus: "unverified",
+          },
+          {
+            email: "aperez@clinica.com.ar",
+            source: "pattern",
+            verificationStatus: "unknown",
+            verificationProvider: "no2bounce",
+          },
+        ],
+        phones: [],
+        whatsapps: [],
+      },
       opportunitySignals: [],
       evidence: [],
       websiteResearch: {
@@ -94,5 +111,9 @@ describe("ProspectingLeadEnrichment", () => {
     expect(html).toContain("ana@clinica.com.ar");
     expect(html).toContain("Hola Ana, vi que ofrecen turnos por WhatsApp.");
     expect(html).toContain("https://clinica.com.ar/contacto");
+    expect(html).toContain("Tomado de web oficial");
+    expect(html).toContain("Sin verificación externa");
+    expect(html).toContain("No verificado todavía");
+    expect(html).not.toContain("unknown");
   });
 });

@@ -134,7 +134,10 @@ export class DentalAestheticsProspectingService {
         hasWhatsapp: contacts.whatsapps.length > 0,
         hasGenericEmail: genericEmails.length > 0,
         emailVerificationStatuses: verifiedEmailCandidates.map(
-          ({ verificationStatus }) => verificationStatus,
+          ({ source, verificationStatus }) =>
+            source === "official_website"
+              ? "official_website"
+              : verificationStatus,
         ),
         opportunitySignalCount: websiteResearch.signals.length,
         sourceUrls,
@@ -242,7 +245,11 @@ export class DentalAestheticsProspectingService {
     let submissions = 0;
     let foundValid = false;
     for (const candidate of candidates) {
-      if (foundValid || submissions >= 3) {
+      if (
+        candidate.source === "official_website" ||
+        foundValid ||
+        submissions >= 3
+      ) {
         verified.push(candidate);
         continue;
       }
@@ -306,7 +313,7 @@ function createEmailCandidates(input: {
     seen.add(normalized);
     candidates.push({
       email: normalized,
-      source: "public",
+      source: "official_website",
       verificationStatus: "unverified",
       confidence: 95,
     });
@@ -363,7 +370,7 @@ function selectRecommendedContact(input: {
     input.emailCandidates.find(({ verificationStatus }) => verificationStatus === "valid") ??
     input.emailCandidates.find(
       ({ source, verificationStatus }) =>
-        source === "public" && verificationStatus !== "invalid",
+        source === "official_website" && verificationStatus !== "invalid",
     );
   const person = input.decisionMakers[0];
   if (email) {

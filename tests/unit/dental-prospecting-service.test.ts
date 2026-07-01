@@ -94,21 +94,24 @@ describe("DentalAestheticsProspectingService", () => {
         emailCandidates: [
           {
             email: "mariana.lopez@clinicadentalpalermo.com.ar",
-            source: "public",
-            verificationStatus: "valid",
-            verificationProvider: "no2bounce",
-            verificationTrackingId:
-              "tracking:mariana.lopez@clinicadentalpalermo.com.ar",
+            source: "official_website",
+            verificationStatus: "unverified",
+            confidence: 95,
           },
           {
             email: "mlopez@clinicadentalpalermo.com.ar",
             source: "pattern",
-            verificationStatus: "unverified",
+            verificationStatus: "unknown",
+            verificationProvider: "no2bounce",
+            verificationTrackingId: "tracking:mlopez@clinicadentalpalermo.com.ar",
           },
           {
             email: "mariana@clinicadentalpalermo.com.ar",
             source: "pattern",
-            verificationStatus: "unverified",
+            verificationStatus: "unknown",
+            verificationProvider: "no2bounce",
+            verificationTrackingId:
+              "tracking:mariana@clinicadentalpalermo.com.ar",
           },
         ],
         whatsapps: ["5491123456789"],
@@ -124,7 +127,10 @@ describe("DentalAestheticsProspectingService", () => {
       channel: "email",
       value: "mariana.lopez@clinicadentalpalermo.com.ar",
     });
-    expect(verify).toHaveBeenCalledTimes(1);
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(verify).not.toHaveBeenCalledWith(
+      "mariana.lopez@clinicadentalpalermo.com.ar",
+    );
     expect(result.leads[0].score).toBeGreaterThanOrEqual(85);
     expect(result.rejected).toEqual(
       expect.arrayContaining([
@@ -133,6 +139,64 @@ describe("DentalAestheticsProspectingService", () => {
           kind: "irrelevant",
         }),
       ]),
+    );
+  });
+
+  it("does not spend verifier credits on emails copied from the official website", async () => {
+    const searchClient: ProspectingSearchClient = {
+      searchWeb: vi.fn(async ({ query }) =>
+        query.includes("site:linkedin.com/in")
+          ? []
+          : [
+              {
+                title: "Clínica Web Oficial",
+                url: "https://clinicaweb.com.ar",
+                description: "Implantes y contacto por email.",
+                domain: "clinicaweb.com.ar",
+              },
+            ],
+      ),
+    };
+    const verify = vi.fn(async () => ({
+      status: "valid" as const,
+      provider: "no2bounce" as const,
+    }));
+    const service = new DentalAestheticsProspectingService({
+      searchClient,
+      maxCompanies: 1,
+      emailVerifier: { verify },
+      websiteCrawler: {
+        async crawl() {
+          return {
+            pages: [
+              {
+                requestedUrl: "https://clinicaweb.com.ar/equipo",
+                finalUrl: "https://clinicaweb.com.ar/equipo",
+                status: "fetched" as const,
+                html: `
+                  <section class="team">
+                    <h2>Dra. Paula Ruiz</h2>
+                    <p>Fundadora</p>
+                    <a href="mailto:paula.ruiz@clinicaweb.com.ar">Email</a>
+                  </section>
+                  <p>Implantes dentales.</p>
+                `,
+              },
+            ],
+          };
+        },
+      },
+    });
+
+    const result = await service.run();
+
+    expect(verify).not.toHaveBeenCalledWith("paula.ruiz@clinicaweb.com.ar");
+    expect(result.leads[0].contacts.emailCandidates).toContainEqual(
+      expect.objectContaining({
+        email: "paula.ruiz@clinicaweb.com.ar",
+        source: "official_website",
+        verificationStatus: "unverified",
+      }),
     );
   });
 

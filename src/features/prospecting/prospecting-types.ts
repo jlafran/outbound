@@ -139,7 +139,12 @@ export type ProspectingLead = {
     emails: string[];
     emailCandidates: Array<{
       email: string;
-      source: "pattern" | "public" | "hunter" | "reacher";
+      source:
+        | "official_website"
+        | "pattern"
+        | "public"
+        | "hunter"
+        | "reacher";
       verificationStatus:
         | "unverified"
         | "valid"

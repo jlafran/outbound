@@ -52,6 +52,24 @@ describe("scoreProspectingLead", () => {
     expect(result.reasons).toContain("Falta un decisor asociado con confianza suficiente.");
   });
 
+  it("credits official website emails without requiring external verification", () => {
+    const result = scoreProspectingLead({
+      companyValidated: true,
+      offerFitEvidenceCount: 2,
+      decisionMakerConfidences: ["high"],
+      hasPersonalEmail: true,
+      hasWhatsapp: false,
+      hasGenericEmail: false,
+      emailVerificationStatuses: ["official_website"],
+      opportunitySignalCount: 1,
+      sourceUrls: ["https://clinica.com.ar/equipo"],
+      flags: [],
+    });
+
+    expect(result.components.verifiedEmail).toBe(12);
+    expect(result.status).toBe("actionable");
+  });
+
   it("applies explicit penalties and discards an ambiguous content result", () => {
     const result = scoreProspectingLead({
       companyValidated: false,

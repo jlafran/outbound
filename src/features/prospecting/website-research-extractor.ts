@@ -8,6 +8,7 @@ const servicePattern =
 const rolePatterns: Array<{ pattern: RegExp; role: string }> = [
   { pattern: /directora? odontol[oó]gica?/i, role: "Directora odontológica" },
   { pattern: /directora? m[eé]dica?/i, role: "Director/a médica" },
+  { pattern: /\b(?:ceo|director(?:a)? general)\b/i, role: "Director general/CEO" },
   { pattern: /fundadora?/i, role: "Fundador/a" },
   { pattern: /dueñ[oa]/i, role: "Dueño/a" },
   { pattern: /gerente general/i, role: "Gerente general" },
@@ -72,12 +73,14 @@ export class WebsiteResearchExtractor {
       );
       location ??= cleanText($("address").first().text());
 
-      for (const email of bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []) {
-        emails.add(email.toLowerCase());
+      for (const email of bodyText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,6}\b(?![A-Z0-9.-])/gi) ?? []) {
+        const normalized = normalizeEmail(email, { allowEncodedPrefix: false });
+        if (normalized) emails.add(normalized);
       }
       $('a[href^="mailto:"]').each((_, element) => {
         const value = ($(element).attr("href") ?? "").slice(7).split("?")[0];
-        if (value) emails.add(value.toLowerCase());
+        const normalized = normalizeEmail(value, { allowEncodedPrefix: true });
+        if (normalized) emails.add(normalized);
       });
       $('a[href^="tel:"]').each((_, element) => {
         const value = normalizePhone(($(element).attr("href") ?? "").slice(4));
@@ -103,7 +106,7 @@ export class WebsiteResearchExtractor {
         }
       });
 
-      $('[class*="team"], [class*="staff"], [class*="professional"], [class*="doctor"], article').each(
+      $('[class*="team"], [class*="staff"], [class*="professional"], [class*="doctor"], [class*="about"], [class*="nosotros"], article').each(
         (_, element) => {
           const container = $(element);
           const text = cleanText(container.text()) ?? "";
@@ -114,13 +117,15 @@ export class WebsiteResearchExtractor {
           );
           const name = extractPersonName(heading ?? text);
           if (!name) return;
-          const email = container
-            .find('a[href^="mailto:"]')
-            .first()
-            .attr("href")
-            ?.slice(7)
-            .split("?")[0]
-            .toLowerCase();
+          const email = normalizeEmail(
+            container
+              .find('a[href^="mailto:"]')
+              .first()
+              .attr("href")
+              ?.slice(7)
+              .split("?")[0],
+            { allowEncodedPrefix: true },
+          );
           people.set(normalizeText(name), {
             name,
             role: matchedRole.role,
@@ -206,6 +211,36 @@ function extractPersonName(value: string): string | null {
     /^([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\b/,
   );
   return match?.[1] ?? null;
+}
+
+function normalizeEmail(
+  value: string | undefined,
+  options: { allowEncodedPrefix: boolean },
+): string | undefined {
+  if (!value) return undefined;
+  if (!options.allowEncodedPrefix && /%[0-9a-f]{2}/i.test(value)) {
+    return undefined;
+  }
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+  const cleaned = decoded.trim().replace(/^mailto:/i, "").toLowerCase();
+  if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,6}$/.test(cleaned)) {
+    return undefined;
+  }
+  const [local, domain] = cleaned.split("@");
+  if (
+    !local ||
+    !domain ||
+    /^\d/.test(local) ||
+    /(contacto|email|hola).*(contacto|email|hola)/i.test(local)
+  ) {
+    return undefined;
+  }
+  return cleaned;
 }
 
 function normalizePhone(value: string): string | null {

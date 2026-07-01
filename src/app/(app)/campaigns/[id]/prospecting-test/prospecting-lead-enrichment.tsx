@@ -47,6 +47,23 @@ export function ProspectingLeadEnrichment({ lead }: { lead: ProspectingLead }) {
         ].join(" · ") || "No encontrados"}
       </p>
 
+      <h3>Calidad de contacto</h3>
+      <p>
+        <strong>Estado:</strong> {getReadinessLabel(lead)}
+      </p>
+      {lead.contacts.emailCandidates.length ? (
+        <ul>
+          {lead.contacts.emailCandidates.map((candidate) => (
+            <li key={`${candidate.source}:${candidate.email}`}>
+              {candidate.email} · {getEmailSourceLabel(candidate.source)} ·{" "}
+              {getVerificationLabel(candidate.verificationStatus)}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">No hay emails candidatos todavía.</p>
+      )}
+
       {lead.scoreBreakdown ? (
         <>
           <h3>Por qué tiene este score</h3>
@@ -111,4 +128,59 @@ export function ProspectingLeadEnrichment({ lead }: { lead: ProspectingLead }) {
       )}
     </div>
   );
+}
+
+function getReadinessLabel(lead: ProspectingLead): string {
+  const hasDecisionMaker = lead.decisionMakers.some(({ confidence }) =>
+    confidence === "high" || confidence === "medium",
+  );
+  const hasPersonalEmail = lead.contacts.emailCandidates.some(
+    ({ source, verificationStatus }) =>
+      source === "official_website" ||
+      verificationStatus === "valid" ||
+      verificationStatus === "risky",
+  );
+  const hasInstitutionalChannel =
+    lead.contacts.whatsapps.length > 0 || lead.contacts.emails.length > 0;
+  const hasPending = lead.contacts.emailCandidates.some(
+    ({ verificationStatus }) => verificationStatus === "pending",
+  );
+
+  if (hasDecisionMaker && hasPersonalEmail) return "Listo para contacto personal";
+  if (hasInstitutionalChannel) return "Listo para contacto institucional";
+  if (hasPending) return "Investigación pendiente";
+  return "No contactar todavía";
+}
+
+function getEmailSourceLabel(
+  source: ProspectingLead["contacts"]["emailCandidates"][number]["source"],
+): string {
+  const labels = {
+    official_website: "Tomado de web oficial",
+    pattern: "Inferido por patrón",
+    public: "Fuente pública",
+    hunter: "Hunter",
+    reacher: "Reacher",
+  } satisfies Record<
+    ProspectingLead["contacts"]["emailCandidates"][number]["source"],
+    string
+  >;
+  return labels[source];
+}
+
+function getVerificationLabel(
+  status: ProspectingLead["contacts"]["emailCandidates"][number]["verificationStatus"],
+): string {
+  const labels = {
+    unverified: "Sin verificación externa",
+    valid: "Verificado",
+    risky: "Riesgoso",
+    invalid: "Inválido",
+    pending: "Verificando",
+    unknown: "No verificado todavía",
+  } satisfies Record<
+    ProspectingLead["contacts"]["emailCandidates"][number]["verificationStatus"],
+    string
+  >;
+  return labels[status];
 }
