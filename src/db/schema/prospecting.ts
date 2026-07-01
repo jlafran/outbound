@@ -123,7 +123,7 @@ export const prospectingEmailVerifications = pgTable(
     ),
     check(
       "prospecting_verifications_source_check",
-      sql`${table.source} in ('pattern', 'public', 'hunter', 'reacher')`,
+      sql`${table.source} in ('official_website', 'pattern', 'public', 'hunter', 'reacher')`,
     ),
     check(
       "prospecting_verifications_provider_check",

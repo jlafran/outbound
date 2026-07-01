@@ -1,0 +1,2 @@
+ALTER TABLE "prospecting_email_verifications" DROP CONSTRAINT "prospecting_verifications_source_check";--> statement-breakpoint
+ALTER TABLE "prospecting_email_verifications" ADD CONSTRAINT "prospecting_verifications_source_check" CHECK ("prospecting_email_verifications"."source" in ('official_website', 'pattern', 'public', 'hunter', 'reacher'));

@@ -67,6 +67,15 @@ describe("prospecting persistence migration", () => {
           "prospecting_verifications_workspace_run_idx",
         ]),
       );
+
+      const sourceConstraint = await database.query<{ definition: string }>(`
+        select pg_get_constraintdef(oid) as definition
+        from pg_constraint
+        where conname = 'prospecting_verifications_source_check'
+      `);
+      expect(sourceConstraint.rows[0]?.definition).toContain(
+        "'official_website'::text",
+      );
     } finally {
       await database.close();
     }

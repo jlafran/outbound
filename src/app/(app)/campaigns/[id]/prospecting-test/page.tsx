@@ -7,6 +7,7 @@ import {
   refreshProspectingAction,
   runProspectingAction,
 } from "@/features/prospecting/prospecting-actions";
+import { formatEmailCandidateStatus } from "@/features/prospecting/email-candidate-labels";
 import { ProspectingLeadEnrichment } from "./prospecting-lead-enrichment";
 
 export const dynamic = "force-dynamic";
@@ -196,7 +197,7 @@ export default async function CampaignProspectingTestPage({
                         {lead.contacts.emailCandidates
                           .map(
                             (candidate) =>
-                              `${candidate.email} (${candidate.verificationStatus})`,
+                              `${candidate.email} (${formatEmailCandidateStatus(candidate)})`,
                           )
                           .join(" · ")}
                       </p>
