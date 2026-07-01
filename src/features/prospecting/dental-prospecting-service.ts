@@ -1,9 +1,11 @@
 import {
-  buildDentalAestheticsQueries,
+  buildIndustrialDistributorQueries,
   classifyProspectingResult,
   extractContactsFromText,
   extractDecisionMakerFromResult,
   hasDentalOpportunitySignal,
+  hasIndustrialOpportunitySignal,
+  passesIndustrialSizeGate,
 } from "./dental-aesthetics-profile";
 import type {
   ProspectingLead,
@@ -46,7 +48,7 @@ export class DentalAestheticsProspectingService {
     const unassociatedDecisionMakers: ProspectingLead["decisionMakers"] = [];
     const candidates = new Map<string, BraveSearchResult>();
 
-    for (const query of buildDentalAestheticsQueries()) {
+    for (const query of buildIndustrialDistributorQueries().company) {
       if (candidates.size >= this.maxCompanies) break;
       const results = await this.options.searchClient.searchWeb({
         query,
@@ -109,9 +111,9 @@ export class DentalAestheticsProspectingService {
         await this.verifyEmailCandidates(emailCandidates);
       const opportunitySignals = websiteResearch.signals.length
         ? websiteResearch.signals.map(({ statement }) => statement)
-        : hasDentalOpportunitySignal(candidate)
+        : hasIndustrialOpportunitySignal(candidate) || hasDentalOpportunitySignal(candidate)
           ? [
-              "La fuente pública menciona turnos, WhatsApp o tratamientos compatibles con la oferta.",
+              "La fuente pública menciona señales compatibles con expansión comercial o prospección outbound.",
             ]
           : [];
       const sourceUrls = [
@@ -126,6 +128,9 @@ export class DentalAestheticsProspectingService {
       );
       const genericEmails = contacts.emails.filter((email) => !isPersonalEmail(email));
       const scoreBreakdown = scoreProspectingLead({
+        sizeConfirmed: passesIndustrialSizeGate({
+          branchCount: websiteResearch.branchCount,
+        }).passes,
         companyValidated: websiteResearch.status !== "failed",
         offerFitEvidenceCount:
           websiteResearch.services.length + websiteResearch.signals.length,
@@ -206,12 +211,11 @@ export class DentalAestheticsProspectingService {
     candidate: BraveSearchResult,
   ): Promise<ProspectingLead["decisionMakers"]> {
     const companyName = cleanCompanyName(candidate.title);
-    const queries = [
-      `site:linkedin.com/in "${companyName}" "directora odontológica"`,
-      `site:linkedin.com/in "${companyName}" "fundadora"`,
-      `"${companyName}" "directora odontológica"`,
-      `"${companyName}" "fundadora"`,
-    ];
+    const roleQueries = buildIndustrialDistributorQueries().decisionMakerRoles.slice(0, 6);
+    const queries = roleQueries.flatMap((role) => [
+      `site:linkedin.com/in "${companyName}" "${role}"`,
+      `"${companyName}" "${role}"`,
+    ]);
     const seen = new Set<string>();
     const people: ProspectingLead["decisionMakers"] = [];
 

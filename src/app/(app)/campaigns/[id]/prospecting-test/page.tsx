@@ -8,6 +8,7 @@ import {
   runProspectingAction,
 } from "@/features/prospecting/prospecting-actions";
 import { formatEmailCandidateStatus } from "@/features/prospecting/email-candidate-labels";
+import { formatProspectingRunTime } from "@/features/prospecting/prospecting-time-format";
 import { ProspectingLeadEnrichment } from "./prospecting-lead-enrichment";
 
 export const dynamic = "force-dynamic";
@@ -66,10 +67,10 @@ export default async function CampaignProspectingTestPage({
         <p className="muted">
           <Link href={`/campaigns/${campaign.id}`}>← Volver a campaña</Link>
         </p>
-        <h1>Test de prospección: odontología / estética</h1>
+        <h1>Test de prospección: distribuidores industriales B2B</h1>
         <p>
-          Caso acotado para validar el core: empresas reales, decisores,
-          WhatsApp/email visible, señales de oportunidad y descarte de ruido.
+          Caso acotado para validar el core: distribuidores reales de insumos industriales,
+          maquinaria, herramientas, EPP y seguridad industrial, con decisores comerciales asociados.
         </p>
       </div>
 
@@ -82,11 +83,11 @@ export default async function CampaignProspectingTestPage({
           </div>
           <div>
             <dt>Oferta</dt>
-            <dd>Automatización WhatsApp + seguimiento de pacientes</dd>
+            <dd>Prospección outbound investigada para conseguir nuevos clientes B2B y reuniones calificadas</dd>
           </div>
           <div>
             <dt>Decisores</dt>
-            <dd>Dueño/a, fundador/a, director/a odontológico/a, administración</dd>
+            <dd>Dueño/CEO, gerencia general, dirección comercial, ventas, business development o marketing</dd>
           </div>
           <div>
             <dt>Volumen</dt>
@@ -117,7 +118,7 @@ export default async function CampaignProspectingTestPage({
         </p>
         {latestRun ? (
           <p className="muted">
-            Última corrida guardada: {latestRun.completedAt?.toLocaleString("es-AR")} · {pendingVerifications.length} verificaciones pendientes
+            Última corrida guardada: {latestRun.completedAt ? formatProspectingRunTime(latestRun.completedAt) : "sin hora de cierre"} · {pendingVerifications.length} verificaciones pendientes
           </p>
         ) : null}
         <form action={runProspectingAction}>

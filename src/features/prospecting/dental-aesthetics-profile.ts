@@ -39,6 +39,8 @@ const directoryDomains = new Set([
   "google.com.ar",
   "facebook.com",
   "instagram.com",
+  "mercadolibre.com.ar",
+  "listado.mercadolibre.com.ar",
 ]);
 
 const contentPatterns = [
@@ -53,6 +55,7 @@ const contentPatterns = [
   /\buniversidad\b/i,
   /\bempleo\b/i,
   /\btrabajo\b/i,
+  /\bblog\b/i,
 ];
 
 const institutionPatterns = [
@@ -65,7 +68,7 @@ const institutionPatterns = [
   /\bfacultad\b/i,
 ];
 
-const opportunityPatterns = [
+const dentalOpportunityPatterns = [
   /\bwhatsapp\b/i,
   /\bturnos?\b/i,
   /\bimplantes?\b/i,
@@ -74,16 +77,84 @@ const opportunityPatterns = [
   /\bmedicina est[eé]tica\b/i,
 ];
 
+const industrialCompanyPatterns = [
+  /\bdistribuidora\b/i,
+  /\bmayorista\b/i,
+  /\binsumos industriales\b/i,
+  /\bseguridad industrial\b/i,
+  /\bherramientas industriales\b/i,
+  /\bEPP\b/i,
+  /\belementos de protecci[oó]n personal\b/i,
+  /\babastecimiento\s+para\s+empresas\b/i,
+];
+
+const industrialOpportunityPatterns = [
+  /\bsucursales\b/i,
+  /\bnueva sucursal\b/i,
+  /\bcat[aá]logo\b/i,
+  /\bmarcas representadas\b/i,
+  /\brepresentantes?\s+oficiales?\b/i,
+  /\bampl[ií]a\s+su\s+cat[aá]logo\b/i,
+  /\bindustrias clientes\b/i,
+  /\bventa\s+B2B\b/i,
+];
+
+const retailOnlyPatterns = [
+  /\btienda minorista\b/i,
+  /\bcompra online\b/i,
+  /\bpara tu casa\b/i,
+  /\bpor menor\b/i,
+];
+
 const rolePatterns: Array<{ pattern: RegExp; role: string }> = [
+  { pattern: /\bgerente comercial\b/i, role: "Gerente comercial" },
+  { pattern: /\bgerente de ventas\b/i, role: "Gerente de ventas" },
+  { pattern: /\bdirectora? comercial\b/i, role: "Director/a comercial" },
+  { pattern: /\bbusiness development\b/i, role: "Business development" },
+  { pattern: /\bgerente de marketing\b/i, role: "Gerente de marketing" },
+  { pattern: /\bgerente general\b/i, role: "Gerente general" },
+  { pattern: /\bCEO\b/i, role: "CEO" },
+  { pattern: /\bdueña?o?\b/i, role: "Dueño/a" },
   { pattern: /\bdirectora? odontol[oó]gica?\b/i, role: "Directora odontológica" },
   { pattern: /\bdirectora? m[eé]dica?\b/i, role: "Director/a médica" },
   { pattern: /\bdirector m[eé]dico\b/i, role: "Director/a médica" },
   { pattern: /\bdirectora?\b/i, role: "Director/a" },
   { pattern: /\bfundadora?\b/i, role: "Fundador/a" },
-  { pattern: /\bdueña?o?\b/i, role: "Dueño/a" },
-  { pattern: /\bgerente general\b/i, role: "Gerente general" },
   { pattern: /\badministradora?\b/i, role: "Administrador/a" },
 ];
+
+export function buildIndustrialDistributorQueries(): {
+  company: string[];
+  decisionMakerRoles: string[];
+  evidenceTerms: string[];
+} {
+  return {
+    company: [
+      '"distribuidora industrial" Argentina "sucursales"',
+      '"insumos industriales" "Argentina" "mayorista"',
+      '"seguridad industrial" "EPP" "Argentina" "distribuidora"',
+      '"herramientas industriales" "mayorista" "Argentina"',
+      'site:.com.ar "distribuidora" "insumos industriales" "contacto"',
+      'site:.com.ar "EPP" "seguridad industrial" "sucursales"',
+    ],
+    decisionMakerRoles: [
+      "dueño",
+      "CEO",
+      "gerente general",
+      "director comercial",
+      "gerente comercial",
+      "gerente de ventas",
+      "business development",
+      "gerente de marketing",
+    ],
+    evidenceTerms: [
+      "sucursales",
+      "marcas representadas",
+      "catálogo",
+      "clientes industriales",
+    ],
+  };
+}
 
 export function buildDentalAestheticsQueries(): string[] {
   return [
@@ -140,6 +211,22 @@ export function classifyProspectingResult(
     };
   }
 
+  if (retailOnlyPatterns.some((pattern) => pattern.test(text))) {
+    return {
+      kind: "irrelevant",
+      useful: false,
+      reason: "Parece retail/minorista, no distribuidor B2B industrial.",
+    };
+  }
+
+  if (industrialCompanyPatterns.some((pattern) => pattern.test(text))) {
+    return {
+      kind: "company_candidate",
+      useful: true,
+      reason: "Parece distribuidor/mayorista industrial prospectable.",
+    };
+  }
+
   if (
     /\b(cl[ií]nica|centro|consultorio|odontolog[ií]a|dental|est[eé]tica)\b/i.test(
       text,
@@ -152,7 +239,7 @@ export function classifyProspectingResult(
     };
   }
 
-  if (opportunityPatterns.some((pattern) => pattern.test(text))) {
+  if (dentalOpportunityPatterns.some((pattern) => pattern.test(text))) {
     return {
       kind: "signal_only",
       useful: true,
@@ -196,10 +283,10 @@ export function extractDecisionMakerFromResult(
 
   const nameMatch =
     text.match(
-      /\b(?:Dr\.?|Dra\.?)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\b/,
+      /^([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\s+[-–|·]/,
     ) ??
     text.match(
-      /^([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\s+[-–|·]/,
+      /\b(?:Dr\.?|Dra\.?)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\b/,
     );
   if (!nameMatch) return null;
 
@@ -227,7 +314,28 @@ export function scoreDentalAestheticsLead(input: ScoreDentalLeadInput): number {
 
 export function hasDentalOpportunitySignal(result: BraveSearchResult): boolean {
   const text = `${result.title} ${result.description}`;
-  return opportunityPatterns.some((pattern) => pattern.test(text));
+  return dentalOpportunityPatterns.some((pattern) => pattern.test(text));
+}
+
+export function hasIndustrialOpportunitySignal(result: BraveSearchResult): boolean {
+  const text = `${result.title} ${result.description}`;
+  return industrialOpportunityPatterns.some((pattern) => pattern.test(text));
+}
+
+export function passesIndustrialSizeGate(input: {
+  employeeCount?: number;
+  branchCount?: number;
+}): { passes: boolean; reason: string } {
+  if ((input.employeeCount ?? 0) >= 50) {
+    return { passes: true, reason: "50+ empleados confirmados" };
+  }
+  if ((input.branchCount ?? 0) >= 3) {
+    return { passes: true, reason: "3+ sucursales confirmadas" };
+  }
+  return {
+    passes: false,
+    reason: "Falta evidencia de 50+ empleados o 3+ sucursales",
+  };
 }
 
 function safeUrl(value: string): URL | null {

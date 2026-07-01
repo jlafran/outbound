@@ -4,8 +4,13 @@ import type { CrawledWebsite } from "./official-website-crawler";
 import type { WebsiteResearch } from "./prospecting-types";
 
 const servicePattern =
-  /\b(implantes?|ortodoncia|invisible|est[eé]tica|blanqueamiento|carillas?|pr[oó]tesis|endodoncia|periodoncia|cirug[ií]a|odontopediatr[ií]a)\b/i;
+  /\b(implantes?|ortodoncia|invisible|est[eé]tica|blanqueamiento|carillas?|pr[oó]tesis|endodoncia|periodoncia|cirug[ií]a|odontopediatr[ií]a|insumos industriales|herramientas|seguridad industrial|\bEPP\b|cat[aá]logo|mayorista)\b/i;
 const rolePatterns: Array<{ pattern: RegExp; role: string }> = [
+  { pattern: /gerente comercial/i, role: "Gerente comercial" },
+  { pattern: /gerente de ventas/i, role: "Gerente de ventas" },
+  { pattern: /directora? comercial/i, role: "Director/a comercial" },
+  { pattern: /business development/i, role: "Business development" },
+  { pattern: /gerente de marketing/i, role: "Gerente de marketing" },
   { pattern: /directora? odontol[oó]gica?/i, role: "Directora odontológica" },
   { pattern: /directora? m[eé]dica?/i, role: "Director/a médica" },
   { pattern: /\b(?:ceo|director(?:a)? general)\b/i, role: "Director general/CEO" },
@@ -32,6 +37,7 @@ export class WebsiteResearchExtractor {
     let description: string | undefined;
     let location: string | undefined;
     let branchMentions = 0;
+    let explicitBranchCountTotal: number | undefined;
     let usefulPages = 0;
 
     for (const page of crawled.pages) {
@@ -152,7 +158,25 @@ export class WebsiteResearchExtractor {
           confidence: "high",
         });
       }
-      branchMentions += (bodyText.match(/\bsucursal\b/gi) ?? []).length;
+      if (/\b(cat[aá]logo|marcas representadas|insumos industriales|seguridad industrial|herramientas|EPP)\b/i.test(bodyText)) {
+        addSignal(signals, {
+          kind: "industrial_distribution",
+          statement: "El sitio oficial comunica catálogo o líneas de distribución industrial para empresas.",
+          sourceUrl,
+          confidence: "high",
+        });
+      }
+      const explicitBranchCount = [...bodyText.matchAll(/\b(\d+)\s+sucursal(?:es)?\b/gi)]
+        .map((match) => Number(match[1]))
+        .filter((value) => Number.isFinite(value));
+      explicitBranchCountTotal = Math.max(
+        explicitBranchCountTotal ?? 0,
+        ...explicitBranchCount,
+      );
+      branchMentions = Math.max(branchMentions, ...explicitBranchCount, 0);
+      if (explicitBranchCount.length === 0) {
+        branchMentions += (bodyText.match(/\bsucursal(?:es)?\b/gi) ?? []).length;
+      }
       if (branchMentions > 0) {
         addSignal(signals, {
           kind: "multiple_branches",
@@ -184,7 +208,12 @@ export class WebsiteResearchExtractor {
       description,
       location,
       services: [...services],
-      branchCount: branchMentions > 0 ? branchMentions + 1 : undefined,
+      branchCount:
+        explicitBranchCountTotal && explicitBranchCountTotal > 0
+          ? explicitBranchCountTotal
+          : branchMentions > 0
+            ? branchMentions + 1
+            : undefined,
       signals: [...signals.values()],
       errors,
     };

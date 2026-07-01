@@ -4,6 +4,79 @@ import { DentalAestheticsProspectingService } from "@/features/prospecting/denta
 import type { ProspectingSearchClient } from "@/features/prospecting/prospecting-types";
 
 describe("DentalAestheticsProspectingService", () => {
+  it("uses the industrial distributor profile for the active production prospecting test", async () => {
+    const queries: string[] = [];
+    const searchClient: ProspectingSearchClient = {
+      searchWeb: vi.fn(async ({ query }) => {
+        queries.push(query);
+        if (query.includes("Distribuidora Norte")) {
+          return [
+            {
+              title: "María Gómez - Gerente Comercial en Distribuidora Norte",
+              url: "https://www.linkedin.com/in/maria-gomez-industrial",
+              description:
+                "Gerente comercial de Distribuidora Norte, mayorista de insumos industriales.",
+              domain: "linkedin.com",
+            },
+          ];
+        }
+        return [
+          {
+            title: "Distribuidora Norte | Insumos industriales y EPP",
+            url: "https://distribuidoranorte.com.ar/empresa",
+            description:
+              "Mayorista de herramientas, seguridad industrial y abastecimiento para empresas con sucursales en Argentina.",
+            domain: "distribuidoranorte.com.ar",
+          },
+        ];
+      }),
+    };
+    const service = new DentalAestheticsProspectingService({
+      searchClient,
+      maxCompanies: 1,
+      websiteCrawler: {
+        async crawl() {
+          return {
+            pages: [
+              {
+                requestedUrl: "https://distribuidoranorte.com.ar/empresa",
+                finalUrl: "https://distribuidoranorte.com.ar/empresa",
+                status: "fetched" as const,
+                html: `
+                  <meta property="og:site_name" content="Distribuidora Norte">
+                  <h1>Distribuidora Norte</h1>
+                  <p>Mayorista de insumos industriales, herramientas, EPP y seguridad industrial.</p>
+                  <p>Contamos con 3 sucursales y catálogo para empresas industriales.</p>
+                  <a href="mailto:ventas@distribuidoranorte.com.ar">Ventas</a>
+                `,
+              },
+            ],
+          };
+        },
+      },
+    });
+
+    const result = await service.run();
+
+    expect(queries[0]).toContain("distribuidora industrial");
+    expect(queries).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('"Distribuidora Norte" "gerente comercial"'),
+      ]),
+    );
+    expect(result.leads[0]).toMatchObject({
+      companyName: "Distribuidora Norte",
+      domain: "distribuidoranorte.com.ar",
+      decisionMakers: [
+        expect.objectContaining({
+          name: "María Gómez",
+          role: "Gerente comercial",
+        }),
+      ],
+    });
+    expect(result.leads[0].messageDraft?.body).toContain("nuevos clientes B2B");
+  });
+
   it("turns Brave results into scored actionable company leads with decision makers", async () => {
     const searchClient: ProspectingSearchClient = {
       searchWeb: vi.fn(async ({ query }) => {
@@ -79,7 +152,7 @@ describe("DentalAestheticsProspectingService", () => {
     expect(result.leads[0]).toMatchObject({
       companyName: "Clínica Odontológica Palermo",
       domain: "clinicadentalpalermo.com.ar",
-      status: "actionable",
+      status: "review",
       decisionMakers: [
         {
           name: "Mariana López",
@@ -200,7 +273,7 @@ describe("DentalAestheticsProspectingService", () => {
     );
   });
 
-  it("keeps public LinkedIn people as unassociated decision makers instead of rejected trash", async () => {
+  it("keeps public LinkedIn people out of rejected trash when they are associated", async () => {
     const searchClient: ProspectingSearchClient = {
       searchWeb: vi.fn(async ({ query }) => {
         if (query.includes("site:linkedin.com/in")) {
@@ -256,14 +329,7 @@ describe("DentalAestheticsProspectingService", () => {
         expect.objectContaining({ kind: "person_candidate" }),
       ]),
     );
-    expect(result.unassociatedDecisionMakers).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: "Daniel Escribano",
-          linkedinUrl: "https://www.linkedin.com/in/daniel-escribano",
-        }),
-      ]),
-    );
+    expect(result.unassociatedDecisionMakers).toEqual([]);
   });
 
   it("continues researching other companies when one official site fails", async () => {

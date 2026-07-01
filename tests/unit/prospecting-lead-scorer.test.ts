@@ -52,6 +52,28 @@ describe("scoreProspectingLead", () => {
     expect(result.reasons).toContain("Falta un decisor asociado con confianza suficiente.");
   });
 
+  it("keeps a lead in review when it only has a generic company email", () => {
+    const result = scoreProspectingLead({
+      companyValidated: true,
+      offerFitEvidenceCount: 3,
+      decisionMakerConfidences: ["high"],
+      hasPersonalEmail: false,
+      hasWhatsapp: false,
+      hasGenericEmail: true,
+      emailVerificationStatuses: [],
+      opportunitySignalCount: 3,
+      sourceUrls: [
+        "https://distribuidora.com.ar/equipo",
+        "https://distribuidora.com.ar/catalogo",
+        "https://linkedin.com/in/gerente",
+      ],
+      flags: [],
+    });
+
+    expect(result.status).toBe("review");
+    expect(result.reasons).toContain("Falta un canal personal utilizable para el decisor.");
+  });
+
   it("credits official website emails without requiring external verification", () => {
     const result = scoreProspectingLead({
       companyValidated: true,

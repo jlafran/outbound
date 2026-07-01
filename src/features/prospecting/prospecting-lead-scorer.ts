@@ -7,6 +7,7 @@ type ScoreFlag = "directory" | "editorial" | "ambiguous" | "contradiction";
 
 export function scoreProspectingLead(input: {
   companyValidated: boolean;
+  sizeConfirmed?: boolean;
   offerFitEvidenceCount: number;
   decisionMakerConfidences: Array<"low" | "medium" | "high">;
   hasPersonalEmail: boolean;
@@ -71,20 +72,30 @@ export function scoreProspectingLead(input: {
   );
   const hasAssociatedDecisionMaker =
     strongestDecisionConfidence === "high" || strongestDecisionConfidence === "medium";
-  const hasUsableChannel =
-    input.hasPersonalEmail || input.hasWhatsapp || input.hasGenericEmail;
+  const hasAnyChannel = input.hasPersonalEmail || input.hasWhatsapp || input.hasGenericEmail;
+  const hasPersonalChannel = input.hasPersonalEmail || input.hasWhatsapp;
   const reasons: string[] = [];
   if (!input.companyValidated) reasons.push("No se validó una empresa real del nicho.");
+  if (input.sizeConfirmed === false) {
+    reasons.push("Falta evidencia de 50+ empleados o 3+ sucursales.");
+  }
   if (!hasAssociatedDecisionMaker) {
     reasons.push("Falta un decisor asociado con confianza suficiente.");
   }
-  if (!hasUsableChannel) reasons.push("Falta un canal de contacto utilizable.");
+  if (!hasAnyChannel) reasons.push("Falta un canal de contacto utilizable.");
+  if (hasAnyChannel && !hasPersonalChannel) {
+    reasons.push("Falta un canal personal utilizable para el decisor.");
+  }
   if (input.opportunitySignalCount === 0) {
     reasons.push("No se encontró una señal específica para personalizar el contacto.");
   }
 
   const status: ProspectingLeadStatus =
-    input.companyValidated && hasAssociatedDecisionMaker && hasUsableChannel && total >= 75
+    input.companyValidated &&
+    input.sizeConfirmed !== false &&
+    hasAssociatedDecisionMaker &&
+    hasPersonalChannel &&
+    total >= 75
       ? "actionable"
       : input.companyValidated && total >= 50
         ? "review"

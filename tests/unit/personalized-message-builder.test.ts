@@ -22,7 +22,7 @@ describe("buildPersonalizedMessage", () => {
     expect(result?.evidenceUrls).toEqual(["https://clinica.com.ar/contacto"]);
   });
 
-  it("does not create a personalized message without specific evidence", () => {
+  it("does not create a personalized message without a named decision maker or evidence", () => {
     expect(
       buildPersonalizedMessage({
         companyName: "Clínica Sin Evidencia",
@@ -30,5 +30,34 @@ describe("buildPersonalizedMessage", () => {
         signal: null,
       }),
     ).toBeNull();
+    expect(
+      buildPersonalizedMessage({
+        companyName: "Distribuidora Sin Decisor",
+        decisionMaker: null,
+        signal: {
+          kind: "industrial_distribution",
+          statement: "El sitio oficial comunica catálogo industrial.",
+          sourceUrl: "https://distribuidora.com.ar/catalogo",
+          confidence: "high",
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("builds industrial outbound copy from distribution evidence", () => {
+    const result = buildPersonalizedMessage({
+      companyName: "Distribuidora Norte",
+      decisionMaker: { name: "María Gómez", role: "Gerente comercial" },
+      signal: {
+        kind: "industrial_distribution",
+        statement: "El sitio oficial comunica catálogo industrial.",
+        sourceUrl: "https://distribuidoranorte.com.ar/catalogo",
+        confidence: "high",
+      },
+    });
+
+    expect(result?.subject).toContain("Nuevos clientes B2B");
+    expect(result?.body).toContain("nuevos clientes B2B");
+    expect(result?.body).toContain("podría");
   });
 });
