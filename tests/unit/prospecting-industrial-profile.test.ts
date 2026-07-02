@@ -85,6 +85,23 @@ describe("industrial distributor prospecting profile", () => {
     });
   });
 
+  it("extracts decision makers when the name is in the snippet instead of the result title", () => {
+    expect(
+      extractDecisionMakerFromResult({
+        title: "Gerente Comercial en Suministros Oeste | LinkedIn",
+        url: "https://www.linkedin.com/in/carlos-ramos-industrial",
+        description:
+          "Carlos Ramos es gerente comercial en Suministros Oeste, distribuidor de insumos industriales.",
+        domain: "linkedin.com",
+      }),
+    ).toMatchObject({
+      name: "Carlos Ramos",
+      role: "Gerente comercial",
+      confidence: "medium",
+      companyEvidence: expect.stringContaining("Suministros Oeste"),
+    });
+  });
+
   it("requires confirmed size evidence before a company can pass the industrial gate", () => {
     expect(
       passesIndustrialSizeGate({ employeeCount: 50, branchCount: undefined }),

@@ -77,6 +77,81 @@ describe("DentalAestheticsProspectingService", () => {
     expect(result.leads[0].messageDraft?.body).toContain("nuevos clientes B2B");
   });
 
+  it("searches decision makers with the official company name, not the noisy SEO title", async () => {
+    const queries: string[] = [];
+    const searchClient: ProspectingSearchClient = {
+      searchWeb: vi.fn(async ({ query }) => {
+        queries.push(query);
+        if (query.includes("Suministros Oeste") && query.includes("gerente comercial")) {
+          return [
+            {
+              title: "Carlos Ramos | LinkedIn",
+              url: "https://www.linkedin.com/in/carlos-ramos-industrial",
+              description:
+                "Gerente comercial en Suministros Oeste. Insumos industriales y construcción seca.",
+              domain: "linkedin.com",
+            },
+          ];
+        }
+        if (query.includes("Construcción Seca en Caseros")) {
+          return [];
+        }
+        return [
+          {
+            title: "Suministros Oeste | Insumos Industriales y Construcción Seca en Caseros",
+            url: "https://suministrosoeste.com.ar",
+            description:
+              "Mayorista de herramientas e insumos industriales para empresas.",
+            domain: "suministrosoeste.com.ar",
+          },
+        ];
+      }),
+    };
+
+    const service = new DentalAestheticsProspectingService({
+      searchClient,
+      maxCompanies: 1,
+      websiteCrawler: {
+        async crawl() {
+          return {
+            pages: [
+              {
+                requestedUrl: "https://suministrosoeste.com.ar",
+                finalUrl: "https://suministrosoeste.com.ar",
+                status: "fetched" as const,
+                html: `
+                  <meta property="og:site_name" content="Suministros Oeste">
+                  <h1>Suministros Oeste</h1>
+                  <p>Mayorista de herramientas e insumos industriales para empresas.</p>
+                `,
+              },
+            ],
+          };
+        },
+      },
+    });
+
+    const result = await service.run();
+
+    expect(queries).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('"Suministros Oeste" "gerente comercial"'),
+      ]),
+    );
+    expect(queries).not.toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Construcción Seca en Caseros"),
+      ]),
+    );
+    expect(result.leads[0].decisionMakers).toEqual([
+      expect.objectContaining({
+        name: "Carlos Ramos",
+        role: "Gerente comercial",
+        linkedinUrl: "https://www.linkedin.com/in/carlos-ramos-industrial",
+      }),
+    ]);
+  });
+
   it("turns Brave results into scored actionable company leads with decision makers", async () => {
     const searchClient: ProspectingSearchClient = {
       searchWeb: vi.fn(async ({ query }) => {

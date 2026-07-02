@@ -70,4 +70,26 @@ describe("associateDecisionMakers", () => {
     expect(result.associated).toEqual([]);
     expect(result.unassociated).toEqual([person]);
   });
+
+  it("does not associate industrial people through generic industry words only", () => {
+    const person = {
+      name: "Juan Pérez",
+      role: "Gerente comercial",
+      sourceUrl: "https://linkedin.com/in/juan-perez",
+      linkedinUrl: "https://linkedin.com/in/juan-perez",
+      confidence: "low" as const,
+      companyEvidence:
+        "Gerente comercial en empresa de seguridad industrial y distribuidora mayorista en Argentina.",
+    };
+
+    const result = associateDecisionMakers({
+      companyName: "Seguridad Industrial Argentina",
+      domain: "seguridadindustrial.com.ar",
+      websitePeople: [],
+      searchPeople: [person],
+    });
+
+    expect(result.associated).toEqual([]);
+    expect(result.unassociated).toEqual([person]);
+  });
 });

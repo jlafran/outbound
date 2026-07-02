@@ -11,6 +11,16 @@ const genericCompanyTokens = new Set([
   "argentina",
   "buenos",
   "aires",
+  "industrial",
+  "industriales",
+  "seguridad",
+  "distribuidora",
+  "distribuidor",
+  "mayorista",
+  "insumos",
+  "herramientas",
+  "proveedor",
+  "proveedora",
 ]);
 
 export function associateDecisionMakers(input: {

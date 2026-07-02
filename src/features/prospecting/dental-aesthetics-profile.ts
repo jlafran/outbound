@@ -281,18 +281,12 @@ export function extractDecisionMakerFromResult(
   const matchedRole = rolePatterns.find(({ pattern }) => pattern.test(text));
   if (!matchedRole) return null;
 
-  const nameMatch =
-    text.match(
-      /^([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\s+[-–|·]/,
-    ) ??
-    text.match(
-      /\b(?:Dr\.?|Dra\.?)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\b/,
-    );
-  if (!nameMatch) return null;
+  const name = extractPersonName(text);
+  if (!name) return null;
 
   const isLinkedIn = result.domain.endsWith("linkedin.com");
   return {
-    name: nameMatch[1],
+    name,
     role: matchedRole.role,
     sourceUrl: result.url,
     linkedinUrl: isLinkedIn ? result.url : undefined,
@@ -344,6 +338,25 @@ function safeUrl(value: string): URL | null {
   } catch {
     return null;
   }
+}
+
+const personNamePattern =
+  "([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})";
+
+function extractPersonName(text: string): string | null {
+  const patterns = [
+    new RegExp(`^${personNamePattern}\\s+[-–|·]`),
+    new RegExp(`\\b(?:Dr\\.?|Dra\\.?)\\s+${personNamePattern}\\b`),
+    new RegExp(
+      `\\b${personNamePattern}\\s+(?:es\\s+)?(?:el\\s+|la\\s+)?(?:actual\\s+)?(?:gerente|director|directora|dueño|dueña|fundador|fundadora|administrador|administradora|CEO|business development)`,
+    ),
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1].trim();
+  }
+  return null;
 }
 
 function normalizeArgentinaPhone(value: string): string {

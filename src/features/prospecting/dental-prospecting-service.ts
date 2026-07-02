@@ -92,7 +92,10 @@ export class DentalAestheticsProspectingService {
       const websiteResearch = await this.researchOfficialWebsite(candidate);
       const companyName =
         websiteResearch.companyName ?? cleanCompanyName(candidate.title);
-      const searchedDecisionMakers = await this.findDecisionMakers(candidate);
+      const searchedDecisionMakers = await this.findDecisionMakers({
+        candidate,
+        companyName,
+      });
       const association = associateDecisionMakers({
         companyName,
         domain: candidate.domain,
@@ -207,20 +210,24 @@ export class DentalAestheticsProspectingService {
     };
   }
 
-  private async findDecisionMakers(
-    candidate: BraveSearchResult,
-  ): Promise<ProspectingLead["decisionMakers"]> {
-    const companyName = cleanCompanyName(candidate.title);
-    const roleQueries = buildIndustrialDistributorQueries().decisionMakerRoles.slice(0, 6);
+  private async findDecisionMakers(input: {
+    candidate: BraveSearchResult;
+    companyName: string;
+  }): Promise<ProspectingLead["decisionMakers"]> {
+    const companyName = cleanCompanyName(input.companyName);
+    const domainToken = input.candidate.domain.split(".")[0];
+    const roleQueries = buildIndustrialDistributorQueries().decisionMakerRoles;
     const queries = roleQueries.flatMap((role) => [
       `site:linkedin.com/in "${companyName}" "${role}"`,
       `"${companyName}" "${role}"`,
+      `"${input.candidate.domain}" "${role}"`,
+      `"${domainToken}" "${role}"`,
     ]);
     const seen = new Set<string>();
     const people: ProspectingLead["decisionMakers"] = [];
 
     for (const query of queries) {
-      if (people.length >= 3) break;
+      if (people.length >= 5) break;
       const results = await this.options.searchClient.searchWeb({
         query,
         count: 5,
@@ -233,7 +240,7 @@ export class DentalAestheticsProspectingService {
         if (!person || seen.has(`${person.name}:${person.role}`)) continue;
         seen.add(`${person.name}:${person.role}`);
         people.push(person);
-        if (people.length >= 3) break;
+        if (people.length >= 5) break;
       }
     }
 
